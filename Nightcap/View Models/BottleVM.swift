@@ -1,0 +1,351 @@
+//
+//  BottleVM.swift
+//  Nightcap
+//
+//  This file is part of Nightcap.
+//
+//  Nightcap is free software: you can redistribute it and/or modify it under the terms
+//  of the GNU General Public License as published by the Free Software Foundation,
+//  either version 3 of the License, or (at your option) any later version.
+//
+//  Nightcap is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License along with Nightcap.
+//  If not, see https://www.gnu.org/licenses/.
+//
+
+import Foundation
+import NightcapKit
+import os.log
+import SemanticVersion
+
+private let bottleVMLogger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.gasanache.Nightcap",
+    category: "BottleVM"
+)
+
+@MainActor
+final class BottleVM: ObservableObject {
+    static let shared = BottleVM()
+
+    var bottlesList = BottleData()
+    @Published var bottles: [Bottle] = []
+    /// Set once a bottle finishes being created, to offer its recommended
+    /// components. Nothing else sets it, so the offer is made once per bottle.
+    @Published var setupPromptBottle: Bottle?
+    @Published var bottleCreationAlert: BottleCreationAlert?
+
+    struct BottleCreationAlert: Identifiable {
+        let id = UUID()
+        let message: String
+        let diagnostics: String
+        /// When true the alert offers a "Run Setup" action so the user can
+        /// install the missing Wine runtime directly.
+        let isRuntimeMissing: Bool
+    }
+
+    func loadBottles() {
+        // Keep the live instance for any bottle that is mid-operation:
+        // rebuilding it would reset inFlight and drop the guard that blocks
+        // conflicting actions during move/export/duplicate.
+        let inFlight = Dictionary(bottles.filter(\.inFlight).map { ($0.url, $0) }) { first, _ in first }
+        bottles = bottlesList.loadBottles().map { inFlight[$0.url] ?? $0 }
+    }
+
+    /// Bottles found on disk with no registry entry, awaiting a re-import
+    /// decision from the user (issue #145). Non-empty drives the recovery
+    /// alert in ContentView.
+    @Published var orphanedBottles: [BottleData.OrphanedBottle] = []
+
+    /// Scans the default bottles directory for bottle folders the registry
+    /// doesn't know about — pre-#136 creations, a reset registry, or a
+    /// restored Bottles/ backup.
+    func scanForOrphanedBottles() {
+        orphanedBottles = bottlesList.orphanedBottles()
+    }
+
+    func reimportOrphanedBottles() {
+        for orphan in orphanedBottles where !bottlesList.registerBottlePath(orphan.url) {
+            bottleVMLogger.error(
+                "Failed to re-register orphaned bottle at \(orphan.url.path(percentEncoded: false), privacy: .public)"
+            )
+        }
+        orphanedBottles = []
+        loadBottles()
+    }
+
+    func countActive() -> Int {
+        bottles.filter { $0.isAvailable == true }.count
+    }
+
+    func createNewBottle(bottleName: String, winVersion: WinVersion, bottleURL: URL) -> URL {
+        let newBottleDir = bottleURL.appending(path: UUID().uuidString)
+
+        let request = BottleCreationRequest(
+            bottleName: bottleName,
+            winVersion: winVersion,
+            bottleURL: bottleURL,
+            newBottleDir: newBottleDir
+        )
+        Task {
+            await self.createBottleTask(request: request)
+        }
+        return newBottleDir
+    }
+
+    private struct BottleCreationRequest {
+        let bottleName: String
+        let winVersion: WinVersion
+        let bottleURL: URL
+        let newBottleDir: URL
+    }
+
+    private func createBottleTask(request: BottleCreationRequest) async {
+        var bottle: Bottle?
+        do {
+            // The Wine runtime is required to initialize the prefix; fail fast
+            // with an actionable error instead of a low-level file-not-found
+            // failure from the wine invocation (issue #61).
+            guard NightcapWineInstaller.isNightcapWineInstalled() else {
+                throw BottleCreationError.runtimeMissing
+            }
+
+            // Pre-flight the chosen location before creating anything, so an
+            // unwritable or near-full destination surfaces a clear error up
+            // front instead of a cryptic late wineboot failure (issue #61).
+            if let refusal = bottleLocationRefusal(BottleLocationValidation.validate(at: request.bottleURL)) {
+                throw BottleCreationError.locationUnsuitable(message: refusal)
+            }
+
+            try createBottleDirectory(at: request.newBottleDir)
+
+            // Create bottle on main actor (since Bottle is @MainActor)
+            let createdBottle = Bottle(bottleUrl: request.newBottleDir, inFlight: true)
+            bottle = createdBottle
+            bottles.append(createdBottle)
+
+            // Configure bottle settings (all on MainActor)
+            createdBottle.settings.windowsVersion = request.winVersion
+            createdBottle.settings.name = request.bottleName
+
+            // Wine operations are async and can run on background threads
+            try await Wine.changeWinVersion(bottle: createdBottle, win: request.winVersion)
+            let wineVer = try await Wine.wineVersion()
+            createdBottle.settings.wineVersion = SemanticVersion(wineVer) ?? SemanticVersion(0, 0, 0)
+
+            // Bootstrap host fonts so Unity titles render fallback glyphs correctly.
+            BottleFontBootstrap.copySystemFonts(toPrefix: createdBottle.url)
+
+            // Place any Windows libraries the user has supplied. Wine has no
+            // builtin for these, so they fill gaps rather than shadowing the
+            // runtime, and a bottle created before anything was supplied just
+            // gets nothing.
+            SystemLibraryStore.deployAvailable(toBottleAt: createdBottle.url)
+
+            // Save settings
+            createdBottle.saveBottleSettings()
+
+            try persistBottleCreation(request: request)
+
+            // The bottle is finished, so clear the flag that marks it as still
+            // being built. Without this the sidebar spinner never stops and
+            // every control gated on `inFlight` stays disabled until the app is
+            // relaunched -- and it has to happen before `loadBottles()`, which
+            // deliberately keeps in-flight instances rather than replacing them
+            // with what is on disk.
+            createdBottle.inFlight = false
+
+            loadBottles()
+
+            // A fresh prefix has none of the runtimes Windows programs assume.
+            setupPromptBottle = createdBottle
+        } catch {
+            handleBottleCreationFailure(error, request: request, bottle: bottle)
+        }
+    }
+
+    private func createBottleDirectory(at url: URL) throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(
+            at: url,
+            withIntermediateDirectories: true,
+            attributes: nil
+        )
+        guard fileManager.fileExists(atPath: url.path(percentEncoded: false)) else {
+            throw BottleCreationError.directoryCreationFailed
+        }
+    }
+
+    private func persistBottleCreation(request: BottleCreationRequest) throws {
+        // registerBottlePath verifies the entries file on disk actually
+        // contains the new path; a silent save failure here used to make the
+        // bottle vanish on the next launch with no explanation (issue #61).
+        guard bottlesList.registerBottlePath(request.newBottleDir) else {
+            throw BottleCreationError.persistenceSaveFailed
+        }
+    }
+
+    private func handleBottleCreationFailure(
+        _ error: Error,
+        request: BottleCreationRequest,
+        bottle: Bottle?
+    ) {
+        let message = error.localizedDescription
+        let diagnostics = makeBottleCreationDiagnostics(
+            bottleName: request.bottleName,
+            winVersion: request.winVersion,
+            bottleURL: request.bottleURL,
+            newBottleDir: request.newBottleDir,
+            error: error
+        )
+        bottleVMLogger.error("Failed to create new bottle: \(message)")
+        bottleVMLogger.error("\(diagnostics, privacy: .public)")
+        bottleCreationAlert = BottleCreationAlert(
+            message: message,
+            diagnostics: diagnostics,
+            isRuntimeMissing: (error as? BottleCreationError) == .runtimeMissing
+        )
+
+        // Clean up on failure
+        if let bottle, let index = bottles.firstIndex(of: bottle) {
+            bottles.remove(at: index)
+        }
+        try? FileManager.default.removeItem(at: request.newBottleDir)
+    }
+
+    private func makeBottleCreationDiagnostics(
+        bottleName: String,
+        winVersion: WinVersion,
+        bottleURL: URL,
+        newBottleDir: URL,
+        error: Error
+    ) -> String {
+        func redactHome(_ path: String) -> String {
+            let home = FileManager.default.homeDirectoryForCurrentUser.path(percentEncoded: false)
+            return path.replacingOccurrences(of: home, with: "~")
+        }
+
+        let context = BottleCreationDiagnosticsContext(
+            bottleName: bottleName,
+            winVersion: winVersion,
+            bottleURL: bottleURL,
+            newBottleDir: newBottleDir,
+            redactHome: redactHome
+        )
+
+        let lines = makeBottleCreationDiagnosticsLines(
+            context: context,
+            nightcapVersionString: formattedNightcapVersion(),
+            nsError: error as NSError
+        )
+
+        // Keep diagnostics bounded for copy/paste.
+        return lines.joined(separator: "\n").prefix(4_000).description
+    }
+
+    private struct BottleCreationDiagnosticsContext {
+        let bottleName: String
+        let winVersion: WinVersion
+        let bottleURL: URL
+        let newBottleDir: URL
+        let bottleURLPath: String
+        let newBottleDirPath: String
+        let bottleDataPath: String
+
+        init(
+            bottleName: String,
+            winVersion: WinVersion,
+            bottleURL: URL,
+            newBottleDir: URL,
+            redactHome: (String) -> String
+        ) {
+            self.bottleName = bottleName
+            self.winVersion = winVersion
+            self.bottleURL = bottleURL
+            self.newBottleDir = newBottleDir
+            bottleURLPath = redactHome(bottleURL.path(percentEncoded: false))
+            newBottleDirPath = redactHome(newBottleDir.path(percentEncoded: false))
+            bottleDataPath = redactHome(BottleData.bottleEntriesDir.path(percentEncoded: false))
+        }
+    }
+
+    private func formattedNightcapVersion() -> String {
+        let nightcapVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let buildNumber = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard !nightcapVersion.isEmpty else { return "unknown" }
+        return buildNumber.isEmpty ? nightcapVersion : "\(nightcapVersion) (\(buildNumber))"
+    }
+
+    private func makeBottleCreationDiagnosticsLines(
+        context: BottleCreationDiagnosticsContext,
+        nightcapVersionString: String,
+        nsError: NSError
+    ) -> [String] {
+        var lines: [String] = []
+        lines.reserveCapacity(32)
+
+        lines.append("Nightcap Bottle Creation Diagnostics (Issue #61)")
+        lines.append("Timestamp: \(Date().formatted())")
+        lines.append("")
+        appendBottleCreationInputLines(into: &lines, context: context)
+        appendBottleCreationSystemLines(into: &lines, nightcapVersionString: nightcapVersionString)
+        appendBottleCreationFilesystemLines(into: &lines, context: context)
+        appendBottleCreationErrorLines(into: &lines, nsError: nsError)
+
+        return lines
+    }
+
+    private func appendBottleCreationInputLines(
+        into lines: inout [String],
+        context: BottleCreationDiagnosticsContext
+    ) {
+        lines.append("[INPUT]")
+        lines.append("Bottle Name: \(context.bottleName)")
+        lines.append("Windows Version: \(context.winVersion)")
+        lines.append("Target Folder: \(context.bottleURLPath)")
+        lines.append("New Bottle Dir: \(context.newBottleDirPath)")
+        lines.append("")
+    }
+
+    private func appendBottleCreationSystemLines(
+        into lines: inout [String],
+        nightcapVersionString: String
+    ) {
+        lines.append("[SYSTEM]")
+        lines.append("macOS Version: \(MacOSVersion.current.description)")
+        lines.append("Nightcap Version: \(nightcapVersionString)")
+        let nightcapWineInstalled = NightcapWineInstaller.isNightcapWineInstalled() ? "yes" : "no"
+        lines.append("NightcapWine Installed: \(nightcapWineInstalled)")
+        if let nightcapWineVersion = NightcapWineInstaller.nightcapWineVersion() {
+            lines.append("NightcapWine Version: \(nightcapWineVersion)")
+        }
+        lines.append("")
+    }
+
+    private func appendBottleCreationFilesystemLines(
+        into lines: inout [String],
+        context: BottleCreationDiagnosticsContext
+    ) {
+        lines.append("[FILESYSTEM]")
+        let fileManager = FileManager.default
+        let targetFolderExists = fileManager
+            .fileExists(atPath: context.bottleURL.path(percentEncoded: false)) ? "yes" : "no"
+        let newBottleDirExists = fileManager
+            .fileExists(atPath: context.newBottleDir.path(percentEncoded: false)) ? "yes" : "no"
+        lines.append("Target folder exists: \(targetFolderExists)")
+        lines.append("New bottle dir exists: \(newBottleDirExists)")
+        lines.append("BottleData file: \(context.bottleDataPath)")
+        lines.append("")
+    }
+
+    private func appendBottleCreationErrorLines(
+        into lines: inout [String],
+        nsError: NSError
+    ) {
+        lines.append("[ERROR]")
+        lines.append("Error: \(nsError.localizedDescription)")
+        lines.append("NSError: domain=\(nsError.domain) code=\(nsError.code)")
+    }
+}

@@ -1,0 +1,84 @@
+# Security Policy
+
+## Supported Versions
+
+The following versions of Nightcap are currently supported with security updates:
+
+| Version | Supported          |
+| ------- | ------------------ |
+| Latest  | :white_check_mark: |
+| < Latest | :x:               |
+
+We recommend always using the latest version of Nightcap for the best security and feature support.
+
+## Reporting a Vulnerability
+
+If you discover a security vulnerability in Nightcap, please report it responsibly:
+
+1. **Do not** open a public GitHub issue for security vulnerabilities
+2. **Use** GitHub's private vulnerability reporting feature via the **Security** tab of this repository:
+   - Navigate to **Security** → **Report a vulnerability**
+   - Or use this direct link: [Report a vulnerability](https://github.com/gasanache/Nightcap/security/advisories/new)
+3. **Include** the following information in your report:
+   - Description of the vulnerability
+   - Steps to reproduce the issue
+   - Potential impact assessment
+   - Any suggested fixes (optional)
+
+### What to Expect
+
+- **Acknowledgment**: We will acknowledge receipt of your report within 48 hours
+- **Assessment**: We will assess the vulnerability and determine its severity
+- **Timeline**: We aim to address critical vulnerabilities within 7 days, and other issues within 30 days
+- **Credit**: With your permission, we will credit you in the security advisory
+
+### Scope
+
+This security policy applies to:
+- The Nightcap application
+- NightcapKit library
+- Related command-line tools (NightcapCmd)
+- Build and release infrastructure
+
+### Out of Scope
+
+The following are generally out of scope:
+- Vulnerabilities in Wine itself (report to [WineHQ](https://wiki.winehq.org/Bugs))
+- Vulnerabilities in DXVK (report to the respective project)
+- Issues in third-party dependencies (report upstream, then notify us)
+
+### Wine / DXVK Vulnerability Response
+
+Nightcap bundles a Wine runtime (Wine, DXVK, D3DMetal, and related components) that it does not develop.
+A vulnerability in those components is fixed upstream, not here — but it still reaches Nightcap users, so
+we track it as a runtime-currency concern rather than a closed door:
+
+- Bundled component versions are pinned and checked against their upstream sources, so a new upstream
+  build carrying a security fix is surfaced rather than missed.
+- A **critical** vulnerability in a bundled component (one exploitable through normal Nightcap use) is a
+  trigger to rebuild the runtime archive on the patched upstream version and cut a new app release out
+  of band, rather than waiting for the next scheduled runtime update.
+- Non-critical upstream fixes are picked up as part of the normal runtime-update cadence.
+
+If you believe a bundled-runtime vulnerability is being mishandled or under-prioritized in Nightcap's
+packaging, report it through the private channel above and say so explicitly.
+
+## Telemetry & Data Collection
+
+Nightcap collects nothing. There is no analytics or telemetry SDK in the app, no
+usage reporting — anonymous or otherwise — and nothing to opt in or out of.
+
+The only requests Nightcap makes on its own are the ones setup needs: the Wine
+runtime version manifest and the runtime archive download. Everything else stays
+on your machine.
+
+## Security Best Practices for Users
+
+- Only run trusted Windows applications within Nightcap
+- Keep Nightcap and macOS updated to the latest versions
+- Be cautious when downloading Windows executables from untrusted sources
+- Review application permissions before running unknown software
+
+## Acknowledgments
+
+We thank the security research community for helping keep Nightcap secure.

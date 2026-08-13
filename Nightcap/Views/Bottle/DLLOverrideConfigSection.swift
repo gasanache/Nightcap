@@ -1,0 +1,82 @@
+//
+//  DLLOverrideConfigSection.swift
+//  Nightcap
+//
+//  This file is part of Nightcap.
+//
+//  Nightcap is free software: you can redistribute it and/or modify it under the terms
+//  of the GNU General Public License as published by the Free Software Foundation,
+//  either version 3 of the License, or (at your option) any later version.
+//
+//  Nightcap is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License along with Nightcap.
+//  If not, see https://www.gnu.org/licenses/.
+//
+
+import NightcapKit
+import SwiftUI
+
+/// Bottle-level DLL override configuration section for ``ConfigView``.
+///
+/// Displays managed overrides from DXVK toggle and launcher presets as read-only entries,
+/// and provides the ``DLLOverrideEditor`` for editing custom bottle-level overrides.
+struct DLLOverrideConfigSection: View {
+    @ObservedObject var bottle: Bottle
+
+    var body: some View {
+        Section("config.title.dllOverrides") {
+            DLLOverrideEditor(
+                managedOverrides: computedManagedOverrides,
+                customOverrides: $bottle.settings.dllOverrides,
+                warnings: computedWarnings
+            )
+        }
+    }
+
+    /// Computes managed overrides from bottle state (graphics backend, launcher presets).
+    private var computedManagedOverrides: [(entry: DLLOverrideEntry, source: String)] {
+        var managed: [(entry: DLLOverrideEntry, source: String)] = []
+
+        // The backend, not the legacy `dxvk` flag: the launch path only honours
+        // that flag when no backend is set, so reading it here listed
+        // overrides that were not the ones being applied.
+        let backend = bottle.settings.graphicsBackend == .recommended
+            ? GraphicsBackendResolver.resolve()
+            : bottle.settings.graphicsBackend
+        for entry in DLLOverrideResolver.managedPreset(for: backend) {
+            managed.append((entry: entry, source: backend.displayName))
+        }
+
+        // Launcher managed entries (when launcher requires DXVK and autoEnableDXVK is on)
+        if bottle.settings.launcherCompatibilityMode,
+           bottle.settings.autoEnableDXVK,
+           let launcher = bottle.settings.detectedLauncher,
+           launcher.requiresDXVK {
+            for entry in DLLOverrideResolver.dxvkPreset
+                where !managed.contains(where: { $0.entry.dllName == entry.dllName }) {
+                managed.append((
+                    entry: entry,
+                    source: String(localized: "config.dllOverrides.source.launcher")
+                ))
+            }
+        }
+
+        return managed
+    }
+
+    /// Computes warnings using DLLOverrideResolver for custom overrides conflicting with managed ones.
+    private var computedWarnings: [DLLOverrideWarning] {
+        let managedEntries: [(entry: DLLOverrideEntry, source: DLLOverrideSource)] = computedManagedOverrides.map {
+            ($0.entry, .dxvk)
+        }
+        let resolver = DLLOverrideResolver(
+            managed: managedEntries,
+            bottleCustom: bottle.settings.dllOverrides,
+            programCustom: []
+        )
+        return resolver.resolve().warnings
+    }
+}

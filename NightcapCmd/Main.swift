@@ -1,0 +1,604 @@
+// swiftlint:disable file_length
+//
+//  Main.swift
+//  NightcapCmd
+//
+//  This file is part of Nightcap.
+//
+//  Nightcap is free software: you can redistribute it and/or modify it under the terms
+//  of the GNU General Public License as published by the Free Software Foundation,
+//  either version 3 of the License, or (at your option) any later version.
+//
+//  Nightcap is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License along with Nightcap.
+//  If not, see https://www.gnu.org/licenses/.
+//
+
+import ArgumentParser
+import Foundation
+import NightcapKit
+import SemanticVersion
+
+/// A well-formed invocation that names state the system does not have or an
+/// operation that failed: a missing bottle, an unknown game, a failed
+/// creation. Prints the message to stderr and exits 1. Exit 64 with the
+/// usage block stays reserved for malformed invocations.
+struct DomainError: LocalizedError {
+    private let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
+
+    var errorDescription: String? {
+        message
+    }
+}
+
+@main
+struct Nightcap: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        abstract: "A CLI interface for Nightcap.",
+        discussion: """
+        Exit codes: 64 for a malformed invocation (unknown flags, missing or \
+        empty arguments; printed with usage), 1 for a well-formed command \
+        that fails (no such bottle, game not found, operation failed), and \
+        `run` and `launch` pass through the launched program's own nonzero \
+        exit code.
+        """,
+        subcommands: [
+            List.self,
+            Create.self,
+            Add.self,
+//                      Export.self,
+            Delete.self,
+            Remove.self,
+            Run.self,
+            Games.self,
+            Launch.self,
+            Shortcut.self,
+            Shellenv.self
+            /* Install.self,
+             Uninstall.self */
+        ]
+    )
+}
+
+extension Nightcap {
+    struct List: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "List existing bottles.")
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            var table = TextTable(headers: ["Name", "Windows Version", "Path"])
+            for bottle in bottles {
+                table.addRow(values: [
+                    bottle.settings.name,
+                    bottle.settings.windowsVersion.pretty(),
+                    bottle.url.prettyPath()
+                ])
+            }
+
+            print(table.render())
+        }
+    }
+
+    struct Create: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Create a new bottle.")
+
+        @Argument var name: String
+
+        @MainActor
+        mutating func run() async throws {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw ValidationError("Bottle name cannot be empty.")
+            }
+
+            var bottlesList = BottleData()
+            let existing = bottlesList.loadBottles()
+            if existing.contains(where: { $0.settings.name == trimmed }) {
+                throw DomainError("A bottle named \"\(trimmed)\" already exists.")
+            }
+
+            let bottleURL = BottleData.defaultBottleDir.appending(path: UUID().uuidString)
+
+            do {
+                try FileManager.default.createDirectory(
+                    atPath: bottleURL.path(percentEncoded: false),
+                    withIntermediateDirectories: true
+                )
+                let bottle = Bottle(bottleUrl: bottleURL, inFlight: true)
+                bottle.settings.windowsVersion = .win11
+                bottle.settings.name = trimmed
+                bottle.settings.wineVersion = SemanticVersion(0, 0, 0)
+
+                bottlesList.paths.append(bottleURL)
+                print("Created bottle \"\(trimmed)\". Open Nightcap to bootstrap the Wine prefix.")
+            } catch {
+                throw DomainError("\(error)")
+            }
+        }
+    }
+
+    struct Add: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Add an existing bottle.")
+
+        @Argument var path: String
+
+        mutating func run() throws {
+            // Should be sanitised
+            let bottleURL = URL(filePath: path)
+            let settings = try BottleSettings.decode(from: bottleURL)
+            var bottlesList = BottleData()
+            bottlesList.paths.append(bottleURL)
+            print("Bottle \"\(settings.name)\" added.")
+        }
+    }
+
+    struct Export: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Export an existing bottle.")
+
+        mutating func run() throws {
+//            print("Create a bottle")
+        }
+    }
+
+    struct Delete: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Delete an existing bottle from disk.")
+
+        @Argument var name: String
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            // Should ask for confirmation
+            let bottleToRemove = bottles.first(where: { $0.settings.name == name })
+            if let bottleToRemove {
+                bottlesList.paths.removeAll(where: { $0 == bottleToRemove.url })
+                do {
+                    try FileManager.default.removeItem(at: bottleToRemove.url)
+                    GameRouting().removeRoutes(toBottle: bottleToRemove.url)
+                    print("Deleted \"\(name)\".")
+                } catch {
+                    print(error)
+                }
+            } else {
+                throw DomainError("No bottle called \"\(name)\" found.")
+            }
+        }
+    }
+
+    struct Remove: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Remove an existing bottle from Nightcap.",
+            discussion: "This will not remove the bottle from disk."
+        )
+
+        @Argument var name: String
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            let bottleToRemove = bottles.first(where: { $0.settings.name == name })
+            if let bottleToRemove {
+                bottlesList.paths.removeAll(where: { $0 == bottleToRemove.url })
+                print("Removed \"\(name)\".")
+            } else {
+                throw DomainError("No bottle called \"\(name)\" found.")
+            }
+        }
+    }
+
+    struct Run: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Run a program with Nightcap.",
+            discussion: """
+            Runs a Windows program directly using Wine. Use --command to print \
+            the command instead. Use --follow to stream program output to the \
+            terminal in real time. Use --tail-log to follow the Wine log file.
+
+            Options the program itself takes (for example --disable-gpu) are \
+            passed through as written. If a program option has the same name \
+            as one of run's own options, put it after a bare -- separator: \
+            nightcap run MyBottle app.exe -- --follow
+            """
+        )
+
+        @Argument(help: "Name of the bottle to use")
+        var bottleName: String
+
+        /// Path handling note: ArgumentParser treats @Argument as a single string
+        /// (including spaces via shell quoting), and Wine.runProgram passes the URL
+        /// through an argument array (not string interpolation), so paths with
+        /// spaces, parentheses, apostrophes, and ampersands work correctly.
+        @Argument(help: "Path to the Windows executable")
+        var path: String
+
+        /// .allUnrecognized keeps run's own flags working anywhere on the
+        /// command line while options the parser doesn't know (--disable-gpu)
+        /// flow through to the program instead of erroring. A program flag
+        /// that collides with one of run's flag names still needs the `--`
+        /// terminator to reach the program.
+        @Argument(parsing: .allUnrecognized, help: "Additional arguments to pass to the program")
+        var args: [String] = []
+
+        @Flag(name: .shortAndLong, help: "Print the Wine command instead of running it")
+        var command: Bool = false
+
+        @Flag(name: .long, help: "Stream program output to terminal")
+        var follow: Bool = false
+
+        @Flag(name: .long, help: "Follow the Wine log file after launch")
+        var tailLog: Bool = false
+
+        @MainActor
+        mutating func run() async throws {
+            // .allUnrecognized captures the -- terminator itself instead of
+            // consuming it the way default parsing does. Drop the first one
+            // so `run B app.exe -- --follow` hands the program --follow, not
+            // `-- --follow`; any later -- stays, as it always has.
+            if let terminator = args.firstIndex(of: "--") {
+                args.remove(at: terminator)
+            }
+
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            guard let bottle = bottles.first(where: { $0.settings.name == bottleName }) else {
+                throw DomainError("A bottle with that name doesn't exist.")
+            }
+
+            let url = URL(fileURLWithPath: Self.resolveExecutablePath(path, in: bottle))
+            let program = Program(url: url, bottle: bottle)
+
+            if command {
+                // Print the command for manual execution or scripting
+                // Use array overload to properly escape each argument individually
+                print(program.generateTerminalCommand(args: args))
+            } else if follow {
+                // Stream Wine output to the terminal in real time
+                try await runWithFollow(url: url, args: args, bottle: bottle, program: program)
+            } else {
+                // Default mode: launch and print deterministic confirmation
+                try await runDefault(url: url, args: args, bottle: bottle, program: program)
+            }
+        }
+
+        /// Resolves a user-supplied path to a Unix path inside the bottle.
+        ///
+        /// Windows-style paths like `C:\windows\notepad.exe` get translated to the
+        /// bottle's `drive_c/windows/notepad.exe`. Everything else is taken verbatim
+        /// (URL(fileURLWithPath:) will resolve relative paths against the CWD).
+        @MainActor
+        static func resolveExecutablePath(_ raw: String, in bottle: Bottle) -> String {
+            // Match drive-letter Windows paths like `C:\...` or `C:/...`
+            guard let driveMatch = raw.range(of: #"^([A-Za-z]):[\\/]"#, options: .regularExpression) else {
+                return raw
+            }
+            let drive = raw[raw.index(driveMatch.lowerBound, offsetBy: 0)].lowercased()
+            let rest = raw[driveMatch.upperBound...]
+                .replacingOccurrences(of: "\\", with: "/")
+            let prefix = bottle.url.appending(path: "drive_\(drive)")
+            return prefix.appending(path: rest).path(percentEncoded: false)
+        }
+
+        /// Default run mode: launches the program and prints a deterministic confirmation line.
+        @MainActor
+        private func runDefault(url: URL, args: [String], bottle: Bottle, program: Program) async throws {
+            let environment = program.generateEnvironment()
+
+            do {
+                let result = try await Wine.runProgram(
+                    at: url, args: args, bottle: bottle, environment: environment
+                )
+
+                let exeName = url.lastPathComponent
+                let bottleName = bottle.settings.name
+                var message = "Launched \"\(exeName)\" in bottle \"\(bottleName)\"."
+
+                // Append log path for traceability
+                message += " Log: \(result.logFileURL.path(percentEncoded: false))"
+                print(message)
+
+                if tailLog {
+                    // After launch confirmation, tail the log file
+                    try await tailLogFile(at: result.logFileURL)
+                }
+
+                if result.exitCode != 0 {
+                    throw ExitCode(result.exitCode)
+                }
+            } catch let exitCode as ExitCode {
+                throw exitCode
+            } catch {
+                FileHandle.standardError.write(
+                    Data("Error: \(error.localizedDescription)\n".utf8)
+                )
+                throw ExitCode(1)
+            }
+        }
+
+        /// Follow mode: streams Wine process stdout/stderr to the terminal in real time.
+        @MainActor
+        private func runWithFollow(
+            url: URL, args: [String], bottle: Bottle, program: Program
+        ) async throws {
+            let environment = program.generateEnvironment()
+            var exitCode: Int32 = 0
+
+            // Use the public runWineProcess streaming API for real-time output
+            let wineArgs = ["start", "/unix", url.path(percentEncoded: false)] + args
+            let stream = try Wine.runWineProcess(
+                name: url.lastPathComponent, args: wineArgs, bottle: bottle, environment: environment
+            )
+
+            for await output in stream {
+                switch output {
+                case .started:
+                    break
+                case let .message(line):
+                    FileHandle.standardOutput.write(Data(line.utf8))
+                case let .error(line):
+                    FileHandle.standardError.write(Data(line.utf8))
+                case let .terminated(code):
+                    exitCode = code
+                }
+            }
+
+            FileHandle.standardError.write(Data("Exited with code \(exitCode)\n".utf8))
+
+            if exitCode != 0 {
+                throw ExitCode(exitCode)
+            }
+        }
+
+        /// Tails a log file, printing new lines as they appear until the Wine process exits.
+        @MainActor
+        private func tailLogFile(at logFileURL: URL) async throws {
+            guard FileManager.default.fileExists(atPath: logFileURL.path(percentEncoded: false)) else {
+                return
+            }
+
+            guard let handle = try? FileHandle(forReadingFrom: logFileURL) else { return }
+            defer { try? handle.close() }
+
+            // Seek to end to only show new content
+            _ = try? handle.seekToEnd()
+
+            // Poll for new data until interrupted
+            // This is a simple polling approach; exits after 5 seconds of no new data
+            var idleCount = 0
+            let maxIdleIterations = 50 // 50 * 100ms = 5 seconds of no new data
+
+            while idleCount < maxIdleIterations {
+                let data = handle.availableData
+                if data.isEmpty {
+                    idleCount += 1
+                    try await Task.sleep(for: .milliseconds(100))
+                } else {
+                    idleCount = 0
+                    if let text = String(data: data, encoding: .utf8) {
+                        FileHandle.standardOutput.write(Data(text.utf8))
+                    }
+                }
+            }
+        }
+    }
+
+    struct Shortcut: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Create a macOS app shortcut for a Windows program."
+        )
+
+        @Argument(help: "Name of the bottle")
+        var bottleName: String
+
+        @Argument(help: "Path to the Windows executable")
+        var exePath: String
+
+        @Option(name: .long, help: "Display name for the shortcut")
+        var name: String?
+
+        @Option(name: .long, help: "Output directory (default: ~/Applications)")
+        var output: String?
+
+        @Flag(name: .long, help: "Overwrite existing shortcut")
+        var overwrite: Bool = false
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            guard let bottle = bottles.first(where: { $0.settings.name == bottleName }) else {
+                throw DomainError("A bottle with that name doesn't exist.")
+            }
+
+            let url = URL(fileURLWithPath: exePath)
+            let program = Program(url: url, bottle: bottle)
+
+            // Determine shortcut name: --name option or program name sans extension
+            let shortcutName = name ?? url.deletingPathExtension().lastPathComponent
+
+            // Determine output directory: --output option or ~/Applications/
+            let outputDir: URL = if let output {
+                URL(fileURLWithPath: output)
+            } else {
+                FileManager.default.homeDirectoryForCurrentUser
+                    .appending(path: "Applications")
+            }
+
+            // Ensure output directory exists
+            if !FileManager.default.fileExists(atPath: outputDir.path(percentEncoded: false)) {
+                try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+            }
+
+            let appURL = outputDir.appending(path: "\(shortcutName).app")
+
+            // Check for existing shortcut
+            if FileManager.default.fileExists(atPath: appURL.path(percentEncoded: false)) {
+                if overwrite {
+                    try FileManager.default.removeItem(at: appURL)
+                } else {
+                    throw DomainError(
+                        "Shortcut already exists at \(appURL.path(percentEncoded: false)). "
+                            + "Use --overwrite to replace it."
+                    )
+                }
+            }
+
+            // Generate launch script and create the bundle
+            let target = ShortcutCreator.liveTarget(for: program.url, bottle: program.bottle)
+            let launchScript = ShortcutCreator.liveLaunchScript(for: target)
+            try ShortcutCreator.createShortcutBundle(at: appURL, launchScript: launchScript, name: shortcutName)
+
+            print("Created \(appURL.path(percentEncoded: false))")
+        }
+    }
+
+    struct Shellenv: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Prints export statements for a Bottle for eval.")
+
+        @Argument var bottleName: String
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            guard let bottle = bottles.first(where: { $0.settings.name == bottleName }) else {
+                throw DomainError("A bottle with that name doesn't exist.")
+            }
+
+            let envCmd = Wine.generateTerminalEnvironmentCommand(bottle: bottle)
+            print(envCmd)
+        }
+    }
+
+    struct Install: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Install NightcapWine.")
+
+        mutating func run() throws {}
+    }
+
+    struct Uninstall: ParsableCommand {
+        static let configuration = CommandConfiguration(abstract: "Uninstall NightcapWine.")
+
+        @Flag(name: [.long, .short], help: "Uninstall NightcapWine") var nightcapWine = false
+
+        mutating func run() throws {}
+    }
+}
+
+extension Nightcap {
+    struct Games: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List Steam games installed in a bottle."
+        )
+
+        @Argument(help: "Name of the bottle to inspect")
+        var bottleName: String
+
+        @Flag(name: .long, help: "Output as JSON")
+        var json: Bool = false
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            guard let bottle = bottles.first(where: { $0.settings.name == bottleName }) else {
+                throw DomainError("A bottle with that name doesn't exist.")
+            }
+
+            let games = SteamLibrary.enumerate(bottleURL: bottle.url)
+
+            if json {
+                let payload = games.map { game in
+                    [
+                        "appId": String(game.appId),
+                        "name": game.name,
+                        "installPath": game.installURL.path(percentEncoded: false)
+                    ]
+                }
+                let data = try JSONSerialization.data(
+                    withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]
+                )
+                print(String(bytes: data, encoding: .utf8) ?? "")
+                return
+            }
+
+            var table = TextTable(headers: ["App ID", "Name", "Install Dir"])
+            for game in games {
+                table.addRow(values: [
+                    String(game.appId),
+                    game.name,
+                    game.installURL.lastPathComponent
+                ])
+            }
+            print(table.render())
+        }
+    }
+
+    struct Launch: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Launch a Steam game by App ID.",
+            discussion: """
+            Without --bottle, the bottle a game was last launched from is used, \
+            falling back to the first bottle that has it installed.
+            """
+        )
+
+        @Argument(help: "Steam App ID of the game")
+        var appId: Int
+
+        @Option(name: .long, help: "Name of the bottle to launch from")
+        var bottle: String?
+
+        @Flag(name: .long, help: "Output as JSON")
+        var json: Bool = false
+
+        @MainActor
+        mutating func run() async throws {
+            var bottlesList = BottleData()
+            let bottles = bottlesList.loadBottles()
+
+            let target: Bottle
+            if let bottleName = bottle {
+                guard let named = bottles.first(where: { $0.settings.name == bottleName }) else {
+                    throw DomainError("A bottle with that name doesn't exist.")
+                }
+                target = named
+            } else {
+                target = try SteamLauncher.resolveBottle(appId: appId, in: bottles)
+            }
+
+            try SteamLauncher.launch(appId: appId, bottle: target)
+
+            if json {
+                let payload = [
+                    "appId": String(appId),
+                    "bottle": target.settings.name,
+                    "status": "launched"
+                ]
+                let data = try JSONSerialization.data(
+                    withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]
+                )
+                print(String(bytes: data, encoding: .utf8) ?? "")
+            } else {
+                print("Launched \(appId) in \(target.settings.name)")
+            }
+        }
+    }
+}

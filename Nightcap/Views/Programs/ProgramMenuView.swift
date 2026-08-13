@@ -1,0 +1,77 @@
+//
+//  ProgramMenuView.swift
+//  Nightcap
+//
+//  This file is part of Nightcap.
+//
+//  Nightcap is free software: you can redistribute it and/or modify it under the terms
+//  of the GNU General Public License as published by the Free Software Foundation,
+//  either version 3 of the License, or (at your option) any later version.
+//
+//  Nightcap is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License along with Nightcap.
+//  If not, see https://www.gnu.org/licenses/.
+//
+
+import AppKit
+import NightcapKit
+import SwiftUI
+
+struct ProgramMenuView: View {
+    @ObservedObject var program: Program
+    @Binding var path: NavigationPath
+
+    var body: some View {
+        Button("button.run", systemImage: "play") {
+            // Program-list and pin launches historically skipped launcher
+            // detection; only FileOpenView and the bottle Run button had it.
+            LauncherFixes.detectAndApply(from: program.url, for: program.bottle)
+            program.run()
+        }
+        .labelStyle(.titleAndIcon)
+        Section("program.settings") {
+            Button("program.config", systemImage: "gearshape") {
+                path.append(program)
+            }
+            .labelStyle(.titleAndIcon)
+
+            let buttonName = program.pinned
+                ? String(localized: "button.unpin")
+                : String(localized: "button.pin")
+
+            Button(buttonName, systemImage: "pin") {
+                program.pinned.toggle()
+            }
+            .labelStyle(.titleAndIcon)
+            .symbolVariant(program.pinned ? .slash : .none)
+        }
+        if program.isClickOnce {
+            Section {
+                Button(
+                    String(localized: "program.clickonce.copyUrl"),
+                    systemImage: "link"
+                ) {
+                    if let deploymentURL = ClickOnceManager.shared.deploymentURL(for: program.url) {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(
+                            deploymentURL.absoluteString, forType: .string
+                        )
+                    }
+                }
+                .labelStyle(.titleAndIcon)
+                Button(
+                    String(localized: "program.clickonce.remove"),
+                    systemImage: "trash",
+                    role: .destructive
+                ) {
+                    try? FileManager.default.removeItem(at: program.url)
+                    Task { await program.bottle.updateInstalledPrograms() }
+                }
+                .labelStyle(.titleAndIcon)
+            }
+        }
+    }
+}

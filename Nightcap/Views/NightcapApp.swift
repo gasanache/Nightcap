@@ -1,0 +1,432 @@
+// swiftlint:disable file_length
+//
+//  NightcapApp.swift
+//  Nightcap
+//
+//  This file is part of Nightcap.
+//
+//  Nightcap is free software: you can redistribute it and/or modify it under the terms
+//  of the GNU General Public License as published by the Free Software Foundation,
+//  either version 3 of the License, or (at your option) any later version.
+//
+//  Nightcap is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License along with Nightcap.
+//  If not, see https://www.gnu.org/licenses/.
+//
+
+import NightcapKit
+import os.log
+import SwiftUI
+
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.gasanache.Nightcap",
+    category: "NightcapApp"
+)
+
+@main
+// swiftlint:disable:next type_body_length
+struct NightcapApp: App {
+    /// True when launched by the UI test harness (the `-NightcapUITestMode` launch
+    /// argument set in `NightcapUITests`). UI tests run without a Wine runtime
+    /// installed, which would otherwise auto-present the first-launch setup sheet
+    /// over the main window and race every toolbar interaction; this lets that
+    /// auto-presentation (and the update check) be skipped in tests.
+    static let isUITesting = ProcessInfo.processInfo.arguments.contains("-NightcapUITestMode")
+
+    /// Scene id for the main window, used to reopen it from the menu-bar extra.
+    static let mainWindowID = "main"
+
+    /// Opt-in: show a menu-bar extra and keep Nightcap running after the main
+    /// window closes (see `AppDelegate.applicationShouldTerminateAfterLastWindowClosed`).
+    @AppStorage("showMenuBarExtra") private var showMenuBarExtra = false
+    @State var showSetup: Bool = false
+    @State private var showMigrate: Bool = false
+    @State private var showDiagnosticsSheet: Bool = false
+    @State private var showTroubleshootingPicker: Bool = false
+    @State private var showTroubleshootingWizard: Bool = false
+    @State private var troubleshootingBottle: Bottle?
+    @State private var troubleshootingProgram: Program?
+    @State private var troubleshootingEntryContext: EntryContext?
+    @State private var crashDiagnosisBanner: CrashDiagnosisBannerState?
+    @State private var audioDeviceToast: ToastData?
+    @State private var audioMonitor = AudioDeviceMonitor()
+    @State private var audioAlertTracker = AudioAlertTracker()
+    @State private var lastTroubleshootingSuggestionAt: [String: Date] = [:]
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.openURL) var openURL
+
+    var body: some Scene {
+        WindowGroup(id: Self.mainWindowID) {
+            ContentView(showSetup: $showSetup)
+                .frame(minWidth: ViewWidth.large, minHeight: 316)
+                .environmentObject(BottleVM.shared)
+                .onAppear {
+                    NSWindow.allowsAutomaticWindowTabbing = false
+                    Task.detached {
+                        await NightcapApp.deleteOldLogs()
+                    }
+                    startAudioDeviceListening()
+                }
+                .onReceive(
+                    NotificationCenter.default.publisher(for: .crashDiagnosisAvailable)
+                ) { notification in
+                    handleCrashDiagnosisNotification(notification)
+                }
+                .sheet(isPresented: $showDiagnosticsSheet) {
+                    DiagnosticsPickerSheet()
+                        .environmentObject(BottleVM.shared)
+                }
+                .sheet(isPresented: $showTroubleshootingPicker) {
+                    TroubleshootingTargetPicker(
+                        bottles: BottleVM.shared.bottles
+                    ) { bottle, program in
+                        troubleshootingBottle = bottle
+                        troubleshootingProgram = program
+                        troubleshootingEntryContext = .helpMenu(
+                            bottleURL: bottle.url,
+                            programURL: program?.url
+                        )
+                        showTroubleshootingWizard = true
+                    }
+                }
+                .sheet(isPresented: $showTroubleshootingWizard) {
+                    if let bottle = troubleshootingBottle,
+                       let context = troubleshootingEntryContext {
+                        TroubleshootingWizardView(
+                            bottle: bottle,
+                            program: troubleshootingProgram,
+                            entryContext: context
+                        )
+                    }
+                }
+                .sheet(isPresented: $showMigrate) {
+                    MigrateBottlesSheet()
+                        .environmentObject(BottleVM.shared)
+                }
+                .overlay(alignment: .top) {
+                    if let banner = crashDiagnosisBanner {
+                        crashDiagnosisBannerView(banner)
+                    }
+                }
+                .toast($audioDeviceToast)
+        }
+        // Don't ask me how this works, it just does
+        .handlesExternalEvents(matching: ["{same path of URL?}"])
+        .commands {
+            CommandGroup(before: .systemServices) {
+                Divider()
+                Button("open.setup") {
+                    showSetup = true
+                }
+                Button("install.cli") {
+                    Task {
+                        await NightcapCmd.install()
+                    }
+                }
+            }
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .newItem) {
+                Button("open.bottle") {
+                    let panel = NSOpenPanel()
+                    panel.canChooseFiles = false
+                    panel.canChooseDirectories = true
+                    panel.allowsMultipleSelection = false
+                    panel.canCreateDirectories = false
+                    panel.begin { result in
+                        if result == .OK {
+                            if let url = panel.urls.first {
+                                // Task inherits main actor context from SwiftUI commands builder
+                                Task {
+                                    BottleVM.shared.bottlesList.paths.append(url)
+                                    BottleVM.shared.loadBottles()
+                                }
+                            }
+                        }
+                    }
+                }
+                .keyboardShortcut("I", modifiers: [.command])
+                Button("Migrate from the Original Nightcap…") {
+                    showMigrate = true
+                }
+            }
+            CommandGroup(after: .importExport) {
+                Button("open.logs") {
+                    NightcapApp.openLogsFolder()
+                }
+                .keyboardShortcut("L", modifiers: [.command])
+                Button("kill.bottles") {
+                    NightcapApp.killBottles()
+                }
+                .keyboardShortcut("K", modifiers: [.command, .shift])
+                Button("wine.clearShaderCaches") {
+                    NightcapApp.killBottles() // Better not make things more complicated for ourselves
+                    NightcapApp.wipeShaderCaches()
+                }
+            }
+            CommandGroup(replacing: .help) {
+                Button("help.github") {
+                    if let url = URL(string: "https://github.com/gasanache/Nightcap") {
+                        openURL(url)
+                    }
+                }
+                Button("help.issues") {
+                    if let url = URL(string: "https://github.com/gasanache/Nightcap/issues") {
+                        openURL(url)
+                    }
+                }
+                Divider()
+                Button("Run Diagnostics\u{2026}") {
+                    showDiagnosticsSheet = true
+                }
+                .keyboardShortcut("D", modifiers: [.command, .shift])
+                Button(String(localized: "troubleshooting.entry.helpMenu")) {
+                    showTroubleshootingPicker = true
+                }
+                .keyboardShortcut("T", modifiers: [.command, .shift])
+            }
+        }
+        Settings {
+            SettingsView()
+        }
+        MenuBarExtra("Nightcap", systemImage: "wineglass", isInserted: $showMenuBarExtra) {
+            NightcapMenuBarView()
+                .environmentObject(BottleVM.shared)
+        }
+    }
+
+    // MARK: - Crash Diagnosis Notification
+
+    private func handleCrashDiagnosisNotification(_ notification: Notification) {
+        guard let diagnosis = notification.userInfo?["diagnosis"] as? CrashDiagnosis,
+              let programPath = notification.userInfo?["programPath"] as? String,
+              let logFileURL = notification.userInfo?["logFileURL"] as? URL
+        else { return }
+
+        let programName = URL(fileURLWithPath: programPath).deletingPathExtension().lastPathComponent
+        crashDiagnosisBanner = CrashDiagnosisBannerState(
+            diagnosis: diagnosis,
+            programName: programName,
+            logFileURL: logFileURL
+        )
+
+        // Auto-dismiss after 8 seconds
+        Task {
+            try? await Task.sleep(for: .seconds(8))
+            withAnimation {
+                crashDiagnosisBanner = nil
+            }
+        }
+    }
+
+    private func crashDiagnosisBannerView(_ banner: CrashDiagnosisBannerState) -> some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text("Crash detected \u{2014} \(banner.programName)")
+                .fontWeight(.medium)
+            Spacer()
+            Button("View Diagnosis") {
+                crashDiagnosisBanner = nil
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            Button(String(localized: "troubleshooting.entry.troubleshoot")) {
+                openTroubleshootingFromCrash(banner)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            Button {
+                withAnimation {
+                    crashDiagnosisBanner = nil
+                }
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(.controlBackgroundColor))
+                .shadow(radius: 4)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    // MARK: - Troubleshooting from Crash Banner
+
+    private func openTroubleshootingFromCrash(_ banner: CrashDiagnosisBannerState) {
+        withAnimation {
+            crashDiagnosisBanner = nil
+        }
+
+        // Find the bottle and program for this crash
+        let programPath = banner.logFileURL.deletingLastPathComponent().path
+        for bottle in BottleVM.shared.bottles {
+            if let program = bottle.programs.first(where: { _ in
+                programPath.contains(bottle.url.path(percentEncoded: false))
+            }) {
+                let evidence: [String: String] = [
+                    "crashCategory": banner.diagnosis.primaryCategory?.rawValue ?? "unknown",
+                    "logFileURL": banner.logFileURL.absoluteString
+                ]
+                troubleshootingBottle = bottle
+                troubleshootingProgram = program
+                troubleshootingEntryContext = .launchFailure(
+                    programURL: program.url,
+                    bottleURL: bottle.url,
+                    evidence: evidence
+                )
+                showTroubleshootingWizard = true
+                return
+            }
+        }
+
+        // Fallback: open picker if we could not match the program
+        showTroubleshootingPicker = true
+    }
+
+    /// Checks whether a proactive troubleshooting suggestion should be shown
+    /// for the given program, respecting rate limits (30 min between suggestions,
+    /// 2 hours after dismissal/completion).
+    private func shouldShowProactiveSuggestion(for programKey: String) -> Bool {
+        guard let lastSuggestion = lastTroubleshootingSuggestionAt[programKey] else {
+            return true
+        }
+        let elapsed = Date().timeIntervalSince(lastSuggestion)
+        return elapsed > 1_800 // 30 minutes
+    }
+
+    private func recordTroubleshootingSuggestionShown(for programKey: String) {
+        lastTroubleshootingSuggestionAt[programKey] = Date()
+    }
+
+    private func suppressTroubleshootingSuggestions(for programKey: String) {
+        // Suppress for 2 hours by setting timestamp 90 minutes in the future
+        // (30-minute cooldown + 90 minutes = 2 hours from now)
+        lastTroubleshootingSuggestionAt[programKey] = Date().addingTimeInterval(5_400)
+    }
+
+    // MARK: - Audio Device Alerts
+
+    private func startAudioDeviceListening() {
+        audioMonitor.startListening { event in
+            Task { @MainActor in
+                guard audioAlertTracker.shouldAlert(deviceName: event.deviceName) else { return }
+
+                switch event.eventType {
+                case .defaultOutputChanged, .disconnected:
+                    let message = String(
+                        localized: "audio.alert.disconnected"
+                    ) + ": \(event.deviceName)"
+                    audioDeviceToast = ToastData(message: message, style: .info)
+                case .reconnected:
+                    let message = String(
+                        localized: "audio.alert.reconnected"
+                    ) + ": \(event.deviceName)"
+                    audioDeviceToast = ToastData(message: message, style: .success)
+                case .sampleRateChanged:
+                    // Check for low sample rate (HFP/Bluetooth issue)
+                    if let device = audioMonitor.defaultOutputDevice(),
+                       device.sampleRate < 22_050, device.sampleRate > 0 {
+                        let message = String(localized: "audio.alert.lowSampleRate")
+                            + ": \(event.deviceName)"
+                        audioDeviceToast = ToastData(message: message, style: .info)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - NightcapApp Utility Methods
+
+extension NightcapApp {
+    @MainActor
+    static func killBottles() {
+        for bottle in BottleVM.shared.bottles {
+            // killBottle is fire-and-forget; errors are logged internally
+            Wine.killBottle(bottle: bottle)
+        }
+    }
+
+    static func openLogsFolder() {
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: Wine.logsFolder.path)
+    }
+
+    static func deleteOldLogs() {
+        let pastDate = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: Wine.logsFolder,
+            includingPropertiesForKeys: [.creationDateKey]
+        )
+        else {
+            return
+        }
+
+        let logs = urls.filter { url in
+            url.pathExtension == "log"
+        }
+
+        let oldLogs = logs.filter { url in
+            do {
+                let resourceValues = try url.resourceValues(forKeys: [.creationDateKey])
+
+                return resourceValues.creationDate ?? Date() < pastDate
+            } catch {
+                return false
+            }
+        }
+
+        for log in oldLogs {
+            do {
+                try FileManager.default.removeItem(at: log)
+            } catch {
+                logger.warning("Failed to delete log: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    static func wipeShaderCaches() {
+        let getconf = Process()
+        getconf.executableURL = URL(fileURLWithPath: "/usr/bin/getconf")
+        getconf.arguments = ["DARWIN_USER_CACHE_DIR"]
+        let pipe = Pipe()
+        getconf.standardOutput = pipe
+        do {
+            try getconf.run()
+        } catch {
+            logger.error("Failed to run getconf: \(error.localizedDescription)")
+            return
+        }
+        getconf.waitUntilExit()
+
+        let getconfOutput: Data
+        do {
+            getconfOutput = try pipe.fileHandleForReading.readToEnd() ?? Data()
+        } catch {
+            logger.error("Failed to read getconf output: \(error.localizedDescription)")
+            return
+        }
+
+        guard let getconfOutputString = String(data: getconfOutput, encoding: .utf8) else {
+            logger.error("Failed to decode getconf output as UTF-8")
+            return
+        }
+        let d3dmPath = URL(fileURLWithPath: getconfOutputString.trimmingCharacters(in: .whitespacesAndNewlines))
+            .appending(path: "d3dm").path
+        do {
+            try FileManager.default.removeItem(atPath: d3dmPath)
+            logger.info("Successfully cleared shader caches")
+        } catch {
+            logger.warning("Failed to remove shader cache at \(d3dmPath): \(error.localizedDescription)")
+        }
+    }
+}

@@ -1,0 +1,265 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "default-software",
+      "title": "Default Software",
+      "aliases": [
+        "Software",
+        "Apps",
+        "Applications"
+      ],
+      "subtitle": "Baseline for Windows applications rather than games",
+      "store": "other",
+      "steamAppId": null,
+      "rating": "works",
+      "exeNames": [],
+      "pathPatterns": [],
+      "antiCheat": null,
+      "constraints": {
+        "cpuArchitectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "minMacOSVersion": "15.0.0",
+        "minWineVersion": "10.0"
+      },
+      "variants": [
+        {
+          "id": "software-defaults",
+          "label": "Software defaults",
+          "isDefault": true,
+          "whenToUse": "Apply to a bottle used for desktop applications instead of games",
+          "rationale": [
+            "DXVK brings up Direct3D 10/11, which Chromium and Electron shells use for UI acceleration; wined3d cannot on current macOS",
+            "D3DMetal takes down Chromium-based apps, so it is avoided for software",
+            "Async shader compilation keeps UI interactions from hitching, and its visual-glitch trade-off does not matter for application UIs",
+            "Balanced preset: none of the game-oriented shader shortcuts"
+          ],
+          "settings": {
+            "graphicsBackend": "dxvk",
+            "dxvk": true,
+            "dxvkAsync": true,
+            "enhancedSync": "msync",
+            "forceD3D11": false,
+            "performancePreset": "balanced",
+            "shaderCacheEnabled": true,
+            "avxEnabled": false,
+            "sequoiaCompatMode": true
+          },
+          "environmentVariables": {},
+          "dllOverrides": [],
+          "winetricksVerbs": []
+        }
+      ],
+      "notes": [
+        "A general-purpose baseline for running Windows software rather than games."
+      ],
+      "knownIssues": [],
+      "provenance": {
+        "source": "nightcap-knowledge",
+        "author": "gasanache",
+        "lastUpdated": "2026-08-12T00:00:00Z",
+        "referenceURL": null
+      }
+    },
+    {
+      "id": "diagnostics-off",
+      "title": "Diagnostics Off",
+      "aliases": [
+        "FPS",
+        "Overlay",
+        "HUD",
+        "Debug"
+      ],
+      "subtitle": "Clears every overlay",
+      "store": "other",
+      "steamAppId": null,
+      "rating": "works",
+      "exeNames": [],
+      "pathPatterns": [],
+      "antiCheat": null,
+      "constraints": {
+        "cpuArchitectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "minMacOSVersion": "15.0.0",
+        "minWineVersion": "10.0"
+      },
+      "variants": [
+        {
+          "id": "diagnostics-off",
+          "label": "Turn diagnostics off",
+          "isDefault": true,
+          "whenToUse": "Back to a clean screen",
+          "rationale": [
+            "Clears the FPS counter, the Metal HUD and the frame-rate logging in one step"
+          ],
+          "settings": {
+            "fpsCounter": false,
+            "metalHud": false
+          },
+          "environmentVariables": {},
+          "dllOverrides": [],
+          "winetricksVerbs": []
+        }
+      ],
+      "notes": [
+        "Changes only overlays. Graphics backend, sync and performance settings are left alone."
+      ],
+      "knownIssues": [],
+      "provenance": {
+        "source": "nightcap-knowledge",
+        "author": "gasanache",
+        "lastUpdated": "2026-08-12T00:00:00Z",
+        "referenceURL": null
+      }
+    },
+    {
+      "id": "diagnostics-on",
+      "title": "Diagnostics On",
+      "aliases": [
+        "FPS",
+        "Overlay",
+        "HUD",
+        "Debug"
+      ],
+      "subtitle": "Frame rate and GPU overlays",
+      "store": "other",
+      "steamAppId": null,
+      "rating": "works",
+      "exeNames": [],
+      "pathPatterns": [],
+      "antiCheat": null,
+      "constraints": {
+        "cpuArchitectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "minMacOSVersion": "15.0.0",
+        "minWineVersion": "10.0"
+      },
+      "variants": [
+        {
+          "id": "diagnostics-on",
+          "label": "Turn diagnostics on",
+          "isDefault": true,
+          "whenToUse": "Measuring performance",
+          "rationale": [
+            "The FPS counter follows the active backend: the DXVK HUD where DXVK runs, and Wine's fps debug channel on WineD3D, which has no overlay and logs instead",
+            "Metal HUD draws only on Metal backends, so it stays dark on WineD3D"
+          ],
+          "settings": {
+            "fpsCounter": true,
+            "metalHud": true
+          },
+          "environmentVariables": {},
+          "dllOverrides": [],
+          "winetricksVerbs": []
+        }
+      ],
+      "notes": [
+        "Changes only overlays. Graphics backend, sync and performance settings are left alone."
+      ],
+      "knownIssues": [],
+      "provenance": {
+        "source": "nightcap-knowledge",
+        "author": "gasanache",
+        "lastUpdated": "2026-08-12T00:00:00Z",
+        "referenceURL": null
+      }
+    },
+    {
+      "id": "lineage-ii",
+      "title": "Lineage II",
+      "aliases": [
+        "L2",
+        "Lineage 2",
+        "L2Gold Essence",
+        "L2GoldEssence",
+        "Gold Essence"
+      ],
+      "subtitle": "L2Gold Essence client",
+      "store": "other",
+      "steamAppId": null,
+      "rating": "works",
+      "exeNames": [
+        "L2GoldEssence.exe",
+        "L2.exe",
+        "l2.bin"
+      ],
+      "pathPatterns": [
+        "l2goldessence_gameclient",
+        "lineage ii",
+        "lineage2",
+        "l2gold"
+      ],
+      "antiCheat": null,
+      "constraints": {
+        "cpuArchitectures": [
+          "arm64",
+          "x86_64"
+        ],
+        "minMacOSVersion": "15.0.0",
+        "minWineVersion": "10.0"
+      },
+      "variants": [
+        {
+          "id": "wined3d-dx9",
+          "label": "WineD3D, tuned",
+          "isDefault": true,
+          "whenToUse": "The fastest configuration measured on Apple Silicon",
+          "rationale": [
+            "Measured: wined3d over OpenGL plays fine, while d9vk (D3D9 to Vulkan to MoltenVK) ran below 1 fps",
+            "Lineage II is DirectX 9; DXMT and D3DMetal only translate D3D11 and D3D12, so neither can sit in front of it",
+            "Performance preset and compatibility mode both switch off Metal validation and event tracking, which Apple’s Metal-backed OpenGL driver still pays for",
+            "msync is the cheapest sync primitive on macOS, and fsync is switched off alongside it",
+            "The client is 32-bit, so WINE_LARGE_ADDRESS_AWARE lets it address beyond 2 GB in crowded areas"
+          ],
+          "settings": {
+            "graphicsBackend": "wined3d",
+            "dxvk": false,
+            "dxvkAsync": false,
+            "enhancedSync": "msync",
+            "forceD3D11": false,
+            "performancePreset": "performance",
+            "shaderCacheEnabled": true,
+            "avxEnabled": false,
+            "sequoiaCompatMode": true
+          },
+          "environmentVariables": {
+            "WINE_LARGE_ADDRESS_AWARE": "1"
+          },
+          "dllOverrides": [],
+          "winetricksVerbs": [],
+          "testedWith": {
+            "lastTestedAt": "2026-08-12T00:00:00Z",
+            "macOSVersion": "26.5.2",
+            "wineVersion": "10.0",
+            "cpuArchitecture": "arm64"
+          }
+        }
+      ],
+      "notes": [
+        "Client installed into the bottle by hand; launches and plays.",
+        "Unreal Engine 2 is draw-call bound and Wine taxes every call, so the in-game Option.ini settings matter more than the graphics backend. RENDERCHARACTERCOUNT, PawnShadow and RenderDeco are the expensive ones.",
+        "Some private servers ship L2.exe as an Active Anticheat launcher that installs a kernel driver Wine cannot load, with the real game in l2.bin. This client is not one of them: the two files are byte-identical, so no driver is involved.",
+        "Every dependency the client needs (D3DX9_40, d3dcompiler_43/47, msxml4, vcomp120) ships in system_en, so no winetricks verbs are required. The embedded Chromium UI needs its sandbox disabled, which Nightcap does for every bottle."
+      ],
+      "knownIssues": [
+        {
+          "description": "d9vk (DXVK d3d9) renders under 1 fps through MoltenVK and is not usable for this game",
+          "severity": "high",
+          "workaround": "Leave the backend on WineD3D; do not install a native d3d9.dll into the bottle"
+        }
+      ],
+      "provenance": {
+        "source": "nightcap-knowledge",
+        "author": "gasanache",
+        "lastUpdated": "2026-08-12T00:00:00Z",
+        "referenceURL": null
+      }
+    }
+  ]
+}

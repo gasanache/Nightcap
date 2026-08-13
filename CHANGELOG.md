@@ -1,0 +1,617 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Removed
+- All analytics and telemetry. The PostHog dependency, the five anonymous
+  first-run funnel events, the first-run consent checkbox and the Settings →
+  Privacy toggle are gone, along with the stored consent preference. Nightcap
+  now collects nothing at all, and there is nothing to opt in or out of.
+- Auto-updates. The Sparkle framework is no longer a dependency and is no
+  longer embedded in the app, the update feed and its signing keys are gone,
+  and the Settings → Updates toggle for Nightcap updates has been removed.
+  The app never contacts an update server; new versions are installed from
+  the release page or the Homebrew cask. Checking for NightcapWine runtime
+  updates is unaffected.
+
+### Changed
+- With D3DMetal installed, the Recommended graphics backend now resolves
+  launchers to DXVK, since their Chromium-based clients cannot render on
+  D3DMetal, while the games they start still resolve to D3DMetal. Bottles
+  without D3DMetal installed behave exactly as before (#188).
+- Interrupted runtime downloads now resume where they left off and retry
+  transient failures automatically instead of restarting the full archive
+  from zero. Partial downloads survive quitting the app, the Retry button
+  continues rather than starts over, and a completed archive left behind by
+  an interrupted setup is verified and reused. The SHA-256 integrity check
+  before install is unchanged (#174).
+- Pressing Play on a Steam game no longer creates settings files for every
+  executable near the game's install folder: only the program that actually
+  launches is materialized, so Play is snappier for games that ship many
+  helper executables and bottles stop accumulating unused settings plists
+  (#181).
+- Waiting for a cold Steam client no longer spawns a Wine tasklist process
+  every two seconds: a host-side process check answers the common
+  nothing-running-yet case, so cold starts stop competing with the client
+  they are waiting for (#189).
+
+### Added
+- Creating a bottle on an external or network volume now checks the location
+  up front, while the creation sheet is still open: if macOS is withholding
+  Files and Folders access, the sheet says so and offers a direct route to
+  the privacy settings instead of failing later with a cryptic prefix error.
+  The default location is checked on submit too, and creation stays disabled
+  until the location is usable (#190, #191).
+
+### Fixed
+- Bottles on non-APFS removable drives are no longer refused as "full" when
+  the drive has plenty of space: the capacity check now falls back to the
+  standard figure on external volumes, where the purgeable-space service
+  behind the preferred figure has no backing and reports zero (#192).
+- DLL overrides now reach Wine through the prefix registry instead of the
+  WINEDLLOVERRIDES environment variable: the bottle's set goes to the prefix
+  default and the launched program's resolved set to its own AppDefaults
+  entry (helper processes like steamwebhelper.exe included). A launcher's
+  graphics backend no longer silently becomes every game's backend, and
+  per-program backend overrides now take effect instead of being masked by
+  the inherited variable (#184, #185).
+- The DLL Overrides section now lists the managed overrides of the graphics
+  backend actually in effect: a DXMT bottle shows the four entries it applies
+  at launch instead of none, and a stale legacy DXVK flag no longer credits a
+  D3DMetal bottle with overrides that are never applied (#186).
+- Program override settings now resolve Recommended before reporting: the
+  DXVK sub-controls appear for a program that resolves to DXVK, and the
+  inherited summary names the backend that actually runs instead of reading
+  "Recommended" (#187).
+- A bottle no longer shows up twice in the bottle list and `nightcap list`
+  when the registry holds the same path in two URL forms (with and without
+  a trailing slash). The registry now compares canonical paths everywhere
+  entries are added, and a registry already carrying duplicates is healed
+  on first load (#183).
+- `nightcap run` now passes options it doesn't recognize through to the
+  program, so `nightcap run MyBottle app.exe --disable-gpu` works without a
+  bare `--` separator. A program option that shares a name with one of
+  run's own options still goes after `--`, which the help text now
+  explains (#183).
+- The command line tool now uses consistent exit codes: 64 with a usage
+  block only for malformed invocations, and 1 with a plain error on stderr
+  for well-formed commands that fail (no such bottle, game not found). The
+  convention is documented in `nightcap --help`, and `run` and `launch` still
+  pass through the launched program's own exit code (#182).
+- Steam game routes are now forgotten when their bottle is deleted instead
+  of lingering in the routing store; removing a bottle from the list while
+  keeping its files preserves the routes so a re-imported bottle picks them
+  back up (#180).
+- Output from very short-lived Wine processes is no longer occasionally
+  lost: a race between the pipe reader and the termination drain could
+  finish the process stream before the final chunk was delivered, dropping
+  it from logs and the in-app output view. This was also the cause of the
+  long-standing intermittent CI failure in the process stream tests.
+
+## [3.6.0] - 2026-08-04 (App)
+
+### Added
+- Settings gains a Game Porting Toolkit section: point it at your own
+  download of Apple's evaluation environment (the disk image or a mounted
+  volume) and the D3DMetal payload is validated and imported. Imported
+  payloads are stored safely across engine updates and deploy automatically
+  once an engine capable of running them is installed; the section states
+  plainly whether the current engine can (#164).
+- Bottles with Steam installed now show a games library: installed games are
+  listed with their state (running, downloading, update stalled), and Play
+  brings the client up quietly, starts the game, and applies its community
+  configuration for that launch only instead of rewriting bottle settings.
+  Per-program settings you have tuned yourself still win over the community
+  profile (#161).
+- The command line tool gains `nightcap games` (list a bottle's installed
+  Steam games) and `nightcap launch <appid>` (launch one), both with `--json`
+  output. Launches route through the same pipeline as the app's Play
+  button, remember which bottle an App ID last launched from, and need no
+  `--bottle` flag for games installed in one place (#169).
+- Nightcap is now fully translated in all 22 supported languages: Arabic,
+  Chinese (Simplified and Traditional), Czech, Danish, Dutch, Finnish,
+  French, German, Italian, Japanese, Korean, Polish, Portuguese (Brazil
+  and Portugal), Romanian, Russian, Spanish, Swedish, Turkish, Ukrainian,
+  and Vietnamese. Translations are managed on Crowdin, where corrections
+  and improvements from native speakers are welcome (#177).
+
+### Changed
+- Program shortcuts now launch through the live pipeline instead of baking
+  the environment in when the shortcut is created: a shortcut made today
+  picks up tomorrow's graphics, GameDB, and override changes. Existing
+  shortcuts keep working; recreate a shortcut to adopt the new behavior
+  (#169).
+
+### Fixed
+- The sidebar's running-status check no longer writes a log file per probe:
+  at one probe per minute per visible bottle, the old path accumulated
+  ~1440 stray log files per idle bottle per day and rescanned the whole log
+  folder each time, all on the main thread. The probe now asks wineserver
+  directly, with no logging side effects (#153).
+- A failed bottle move no longer corrupts the bottle's state. Previously the
+  pin and blocklist paths were rewritten (and saved) to point at the new
+  location before the move was attempted, and the bottle stayed marked busy
+  until the app restarted; both are now rolled back when the move fails
+  (#154).
+- Bottle actions no longer re-enable mid-operation: a bottle that is
+  exporting, duplicating, or moving keeps its busy state even when the
+  bottle list reloads (previously any registry reload, such as creating a
+  bottle or re-importing an orphan, dropped the guard and let conflicting
+  actions run against files still being copied) (#155).
+- Games installed in a Steam library are no longer mistaken for the Steam
+  client: executables under `steamapps/common` stop inheriting the client's
+  compatibility profile and get their own launcher detection instead (a
+  Rockstar title bought on Steam now detects the Rockstar launcher).
+  Launches from the program list and pins also run launcher detection now,
+  matching every other launch path (#160).
+- Two programs sharing a filename (the classic `Launch.exe` case) no longer
+  share one settings file. Settings are now keyed by the program's location
+  inside the bottle, existing settings migrate automatically, and the old
+  files are kept so downgrading loses nothing (#162).
+
+## [3.5.2] - 2026-07-30 (App)
+
+### Added
+- Bottles on disk that aren't in the library — created by an older version,
+  left behind by a reset registry, or restored from a backup of the Bottles
+  folder — are now detected at startup and offered for one-click re-import
+  (Closes #145).
+
+### Changed
+- Engine archive extraction is now staged: the archive is unpacked and its
+  symlinks audited in a temporary directory, and only content that passes
+  every safety check is moved into place. A rejected archive leaves the
+  existing installation completely untouched (Closes #147).
+
+### Fixed
+- The backend picker no longer offers D3DMetal when the installed engine
+  doesn't include it, and bottles already configured for D3DMetal show a
+  warning explaining the WineD3D fallback instead of games failing silently
+  at launch (Closes #146).
+- The "Recommended" graphics backend now resolves to one the installed
+  runtime actually provides: DXMT when the runtime bundles it, otherwise
+  DXVK, and D3DMetal only when its payload is present. Previously it always
+  chose D3DMetal, which the runtime doesn't ship, so fresh bottles silently
+  fell back to wined3d and DirectX 11 games failed to launch out of the box
+  (Fixes #141).
+- First-run engine setup no longer fails with "Archive contains unsafe path"
+  on systems whose language formats dates day-first (e.g. UK or French
+  locales). The archive safety check parsed tar's localized listing and
+  wrongly rejected every entry; the listing now runs with a pinned locale so
+  it reads the same everywhere (Fixes #139).
+- An unreadable bottle registry no longer silently wipes the bottle list. On
+  startup the corrupt file is moved aside (an alert says where) and, when the
+  file is in the older paths-only fallback format, the bottle paths are
+  recovered instead of being overwritten with an empty list (Refs #61).
+- Bottle creation now fails loudly when the new bottle can't be saved to the
+  registry: the save is verified on disk and the existing failure alert (with
+  copyable diagnostics) fires. Previously the error case existed but was never
+  raised, so the bottle silently vanished on the next launch (Refs #61).
+- Creating a bottle while the Wine runtime (NightcapWine) isn't installed now
+  shows a clear "runtime missing" error with a Run Setup button instead of a
+  low-level file-not-found failure (Refs #61).
+- The Winetricks button now shows an error when the bundled winetricks
+  resources can't be found, instead of silently doing nothing (Refs #134).
+
+## [3.5.1] - 2026-07-24 (App)
+
+### Fixed
+- Installing bottle dependencies (VC++, .NET, DirectX, fonts) and the Winetricks
+  verb browser now work out of the box. `winetricks` was expected inside the
+  downloaded Wine runtime but was never shipped there, so dependency installs
+  failed with a missing-file error and the verb list showed empty. `winetricks`
+  (and its verb catalog) are now bundled in the app itself, so they work on a
+  clean install with no extra setup (Closes #134).
+
+## [3.5.0] - 2026-06-14 (App)
+
+### Added
+- Bottle configuration options now carry inline descriptions explaining what
+  they do. The Wine section (Windows version, build, enhanced sync, DPI, Retina
+  mode) and the DXVK section (DXVK, async, HUD) previously had no explanation;
+  each now shows a one-line caption so you can make an informed choice without
+  hunting through docs (Closes nightcap-app/nightcap#807).
+- Optional menu-bar extra (**Settings → General → "Show Nightcap in the menu
+  bar"**, off by default). When enabled, a menu-bar item lets you launch a
+  bottle's pinned programs, reopen Nightcap, or quit without the main window
+  focused — and Nightcap keeps running after the window is closed, so it stays
+  reachable from the menu bar and running Wine processes aren't terminated.
+  When disabled, behaviour is unchanged (Closes nightcap-app/nightcap#571).
+
+### Changed
+- Scanning a bottle for installed programs now runs off the main thread —
+  walking the `Program Files` trees and parsing each executable's metadata no
+  longer blocks the UI, so opening or switching to a bottle with many installed
+  programs no longer hitches. The programs list shows a progress indicator while
+  the scan runs (Closes nightcap-app/nightcap#574).
+- Update checks are now gentler: a scheduled background check that finds a new
+  version no longer interrupts you with a focus-stealing dialog. Instead a Dock
+  badge appears and the "Check for Updates" menu item reads "Install Update…",
+  so you can apply it when ready. User-initiated checks and the install itself
+  are unchanged (Closes nightcap-app/nightcap#765).
+
+## [3.4.0] - 2026-06-13 (App)
+
+### Added
+- DXMT (Direct3D 11 → Metal) as a selectable per-bottle and per-program
+  graphics backend, marked Experimental. Deployed per-bottle like DXVK
+  (native DLLs in the prefix), so selecting it for one bottle never affects
+  others. Requires the matching Wine runtime that bundles the DXMT backend
+  (shipped alongside this release); the backend card explains how to update
+  when it's unavailable. D3DMetal remains the recommended default.
+
+### Fixed
+- Per-program graphics overrides now reliably win over the bottle's
+  setting: the override UI's legacy DXVK flag could silently re-enable or
+  disable the wrong translation layer when an explicit backend was chosen
+  for a program.
+- Installing or updating the Wine runtime no longer erases the rest of
+  Nightcap's Application Support folder. Previously the installer wiped the
+  whole folder instead of just the runtime, destroying unrelated app state —
+  including the telemetry queue and anonymous ID, which is why a completed
+  install could go missing from the opt-in funnel.
+- A launch error for a Windows program opened from Finder is no longer
+  silently swallowed — it now surfaces as an error notification instead of
+  only being logged while the dialog closes.
+
+### Changed
+- Wine runtime updated to Libraries v3.1.1, which ships DXMT 0.80 as the
+  native per-bottle backend (see Added). Wine 11.0 and DXVK 1.10.3 are
+  unchanged from the previous runtime.
+
+## [3.3.0] - 2026-06-11 (App)
+
+### Added
+- Optional, **opt-in** anonymous usage telemetry. A checkbox during first-run
+  setup (off by default, changeable anytime in Settings → Privacy) enables five
+  anonymous events covering the first-run funnel — runtime install
+  started/succeeded/failed (with a coarse reason), first bottle created, first
+  program launch attempted — so install failures in the field become visible.
+  The first-program-launch event now fires from both the programs list and a
+  program's detail view, so no real launch path is missed. Nothing is sent
+  without explicit consent; no person profile is created, and no personal data,
+  paths, or raw error text is ever included. The full event list, the SDK context
+  that accompanies it, and the IP/GeoIP handling are documented in the README and
+  SECURITY.md.
+
+### Fixed
+- The first-run telemetry opt-in is now always reachable: when the Wine runtime
+  is missing, setup no longer skips straight past the welcome screen (the only
+  place the consent checkbox lives) before you can make a choice.
+- Bottle and per-program settings are now written atomically, so a crash
+  mid-save can no longer leave a truncated settings file that wipes the
+  configuration.
+- Every persisted settings choice — graphics backend, performance and resolution
+  presets, Windows version, launcher mode/type/locale and spoofed GPU vendor,
+  audio driver/latency/output mode, clipboard and process-cleanup policies, and
+  the per-program equivalents — now tolerates an unknown value written by a newer
+  Nightcap. A single unrecognized choice falls back to its default (per-program
+  overrides fall back to inheriting the bottle's choice) instead of failing to
+  load the entire bottle's settings.
+- An unreadable settings file is no longer silently overwritten. When a bottle's
+  `Metadata.plist` or a program's settings plist can't be decoded (corruption or
+  an unexpected file version), the original is moved aside to a
+  `.corrupt-<timestamp>` sibling before defaults are written, so the unreadable
+  data is preserved for recovery rather than destroyed.
+- Closed several crash vectors when opening a Windows executable with crafted or
+  corrupt headers during icon extraction (also reached by the Finder thumbnail
+  extension): overflow traps in resource-offset math, unbounded recursion on
+  circular or pathologically deep resource directories, and header reads
+  straddling the end of a truncated file. Resource offsets are now resolved with
+  overflow-checked math, the directory walk is depth-capped, and short reads are
+  rejected instead of loading past the buffer.
+- Hardened icon and thumbnail extraction against crafted executables that could
+  previously hang the parser or render garbage: resource directory entry counts
+  are clamped to the file size, the whole resource walk shares a total-entry
+  budget so fan-out can't amplify, and icon bitmap dimensions and palette lengths
+  are validated before reading pixels. An executable with no usable icon now
+  falls back to a generic system icon instead of showing a blank tile.
+- The "Failed to Export Diagnostics Report" alert is now localizable instead of
+  English-only, matching the rest of the launcher diagnostics UI.
+
+## [3.2.0] - 2026-06-10 (App)
+
+### Added
+- The Wine runtime download is now verified against a published SHA-256 before
+  installation. A corrupted or truncated download is caught and rejected with a
+  clear error and a retry, instead of unpacking a broken runtime. Runtime
+  metadata that predates the published checksum still installs unchanged.
+
+### Fixed
+- Bottle creation now validates the chosen location before doing any work: if
+  the folder isn't writable or the disk is nearly full, you get a clear,
+  actionable error up front instead of the bottle silently disappearing after a
+  cryptic Wine failure. Builds on the bottle-creation diagnostics added for
+  issue #61.
+- Runtime installation failures now surface their cause. `install(from:)`
+  propagates the underlying error (missing tarball, disk full, archive
+  extraction failure) instead of swallowing it, so the setup screen shows the
+  specific reason and the diagnostics report captures it.
+- A half-installed Wine runtime is no longer mistaken for a working one. The
+  install check now requires the `wine64` binary on disk, not just the version
+  file, so a partial extraction or removal prompts a clean re-install instead of
+  leaving every bottle to fail with cryptic Wine errors.
+- Bottle-creation error messages are now localizable instead of English-only,
+  so non-English users see translated text when creation fails.
+
+### Documentation
+- Landing page (`frankea.github.io/Nightcap`) now shows app screenshots, adds an
+  honest "Graphics backends" section (D3DMetal default, why DXVK is pinned at
+  1.10.3 by design, and the Wine-wide anti-cheat limitation), and bumps the
+  advertised version to 3.1.0.
+- Replaced the dead "Game Support wiki" links (the wiki page bounced to the repo
+  root) across the README, landing page, and issue templates with the bundled
+  Game Configurations database.
+
+## [3.1.0] - 2026-06-08 (App)
+
+### Added
+- **File → Migrate from the Original Nightcap** discovers bottles created by the
+  archived original app (`com.isaacmarovitz.Whisky`) and imports them in one
+  step, with checkboxes to choose which. Bottles are referenced in place —
+  nothing is moved or copied — so the import is non-destructive and the original
+  app keeps working, replacing the previous manual export/import dance.
+- Bottle creation now copies host fonts (Arial Unicode, Arial, Tahoma) into
+  `drive_c/windows/Fonts` so Unity titles render fallback glyphs instead of
+  empty boxes (Closes nightcap-app/nightcap#1050).
+- File pickers for "Run" and "Pin Program" now accept `.msix`, `.appx`,
+  `.appref-ms`, and `.url` files in addition to `.exe`/`.msi`/`.bat`. Steam
+  desktop shortcuts (`.url`) launch correctly via Wine's `start` handler
+  (Closes nightcap-app/nightcap#756, nightcap-app/nightcap#815, nightcap-app/nightcap#826).
+- Winetricks verb browser is searchable: filter the verb table by name or
+  description (Closes nightcap-app/nightcap#763).
+- Wine inherits the host timezone (`TZ`) so games keying off date/time render
+  correctly instead of treating the bottle as UTC
+  (Closes nightcap-app/nightcap#1001).
+- PE icon extraction returns a generic Windows-executable system icon when
+  parsing fails, so program tiles and pins never render blank
+  (Closes nightcap-app/nightcap#687).
+- Display sleep / screen saver is now suppressed via an `IOPMAssertion` for
+  as long as any Wine process is registered. Controllers don't generate user
+  activity events on macOS, so without this, gaming with only a controller
+  would still trigger the screen saver
+  (Closes nightcap-app/nightcap#547).
+- Bundled GameDB ships 29 new per-game entries with curated configs that
+  GAME-02/GAME-03 surface as one-click recommendations:
+  - Diablo IV, Skyrim Special Edition, Warhammer 40,000: Space Marine
+    (Closes nightcap-app/nightcap#813, nightcap-app/nightcap#1125, nightcap-app/nightcap#1246).
+  - AVX-off recipes for Granblue Fantasy: Relink, Turtle WoW
+    (Closes nightcap-app/nightcap#508, nightcap-app/nightcap#805).
+  - DXVK + runtime recipes for Age of Empires II DE, Bannerlord II,
+    Warframe, Thunderstore Mod Manager, Animal Well, Supermarket Together,
+    Talos Principle 2, Street Fighter 6, PS Plus PC App, Fields of Mistria,
+    Horizon Forbidden West, Injustice 2, Monster Hunter Wilds, Trackmania
+    2020, Trackmania Nations Forever, Team Fortress 2, Potion Craft,
+    TMNT: Shredder's Revenge, Assetto Corsa, Futureport 82
+    (Closes nightcap-app/nightcap#314, nightcap-app/nightcap#524, nightcap-app/nightcap#548,
+    nightcap-app/nightcap#594, nightcap-app/nightcap#647, nightcap-app/nightcap#679,
+    nightcap-app/nightcap#699, nightcap-app/nightcap#757, nightcap-app/nightcap#769,
+    nightcap-app/nightcap#782, nightcap-app/nightcap#845, nightcap-app/nightcap#867,
+    nightcap-app/nightcap#880, nightcap-app/nightcap#891, nightcap-app/nightcap#982,
+    nightcap-app/nightcap#1026, nightcap-app/nightcap#1037, nightcap-app/nightcap#1105,
+    nightcap-app/nightcap#1192, nightcap-app/nightcap#1236, nightcap-app/nightcap#1281,
+    nightcap-app/nightcap#1350).
+  - D3DMetal-preferred recipe for Among Us (DXVK shadow glitch)
+    (Closes nightcap-app/nightcap#1123).
+  - "Broken/unplayable" entries for Cities: Skylines II and Metal Gear Solid
+    Master Collection Vol. 1 with diagnostic notes
+    (Closes nightcap-app/nightcap#1032, nightcap-app/nightcap#1268).
+  - Classic-DDraw recipe (wineD3D + WinXP) for Zuma Deluxe
+    (Closes nightcap-app/nightcap#484).
+- Input config gains "Map Command Key to Windows Ctrl" toggle (under
+  Controller Compatibility Mode). Writes
+  `HKCU\Software\Wine\Mac Driver\{Left,Right}CommandIsCtrl` so common
+  Cmd+A/C/V/S keystrokes register inside Wine apps as Ctrl+A/C/V/S
+  (Closes nightcap-app/nightcap#1060).
+- Setup/Welcome view's "Uninstall" button now offers two options: remove the
+  NightcapWine runtime only (preserves bottles for later reinstall) or remove
+  everything (runtime + default bottles directory + BottleData registry).
+  Bottles at custom paths outside the default directory are preserved
+  (Closes nightcap-app/nightcap#411).
+- The bundled DXVK version is now tracked alongside the runtime version. The
+  NightcapWine version record carries an optional `dxvkVersion`, and the setup
+  diagnostics report gained a `[VERSION]` section listing the installed runtime
+  and DXVK versions to speed up triage of runtime-mismatch issues. The field is
+  backward-compatible: runtime plists without it still load.
+
+### Changed
+- Diagnostic reports (NightcapWine setup and Wine prefix) now link to this fork's issue tracker
+  (`frankea/Nightcap`) instead of the archived upstream, so reports reach a maintained repo. Internal
+  Logger subsystems and notification names also moved off the archived `com.isaacmarovitz.Whisky`
+  namespace onto `com.franke.Nightcap`.
+- Bundled GameDB grows by 4 more entries from the third-pass retriage:
+  DJMAX RESPECT V (Korean fonts + DXVK), They Are Billions (vcrun + DXVK),
+  SpellForce 3 (corefonts + d3dcompiler), Fallout 4 (Sequoia compat + xact)
+  (Closes nightcap-app/nightcap#748, nightcap-app/nightcap#890,
+  nightcap-app/nightcap#980, nightcap-app/nightcap#1312).
+- Bundled GameDB gains 20 more entries from the fourth-pass retriage —
+  full coverage of the long tail of mainstream titles in the upstream
+  backlog: Jusant, Ready or Not, Persona 3 Reload, Binding of Isaac,
+  Trackmania Turbo, It Takes Two, Tales of Berseria, Cobalt Core,
+  Psychonauts 2, Assassin's Creed Odyssey, killer7, Train Sim World 5,
+  Black Mesa, Far Cry 4, Severed Steel, Halo: Master Chief Collection,
+  Mortal Kombat Komplete Edition, YS X: Nordics, Slime Rancher 2,
+  Monster Hunter: World (Iceborne) (Closes nightcap-app/nightcap#279,
+  nightcap-app/nightcap#631, nightcap-app/nightcap#694, nightcap-app/nightcap#727,
+  nightcap-app/nightcap#829, nightcap-app/nightcap#1025, nightcap-app/nightcap#1108,
+  nightcap-app/nightcap#1119, nightcap-app/nightcap#1124, nightcap-app/nightcap#1137,
+  nightcap-app/nightcap#1157, nightcap-app/nightcap#1160, nightcap-app/nightcap#1162,
+  nightcap-app/nightcap#1180, nightcap-app/nightcap#1190, nightcap-app/nightcap#1208,
+  nightcap-app/nightcap#1214, nightcap-app/nightcap#1235, nightcap-app/nightcap#1258,
+  nightcap-app/nightcap#1320). The bundled DB now covers 79 titles.
+- Diagnostic system-info reports use sysctl-based hardware detection
+  (`hw.optional.arm64`) instead of the `#if arch(arm64)` compile-time
+  macro, so a universal binary running its x86_64 slice through Rosetta
+  no longer misreports the host as Intel
+  (Closes nightcap-app/nightcap#1097).
+- Installed-programs list filters out known launcher helpers and crash
+  reporters (steamerrorreporter, steamservice, steamwebhelper, GameOverlayUI,
+  vc_redist, UEPrereqSetup, the CrossOver HTML engine helper, etc.) so the
+  visible list stays clean by default while leaving the user blocklist for
+  app-specific filtering
+  (Closes nightcap-app/nightcap#432, nightcap-app/nightcap#1215).
+- NightcapWine download survives transient Wi-Fi/Ethernet/VPN disconnects via
+  `waitsForConnectivity` and bounded request/resource timeouts so a stalled
+  download surfaces an error instead of hanging forever
+  (Closes nightcap-app/nightcap#293, nightcap-app/nightcap#995, nightcap-app/nightcap#1020, nightcap-app/nightcap#1070).
+
+### Fixed
+- Wine no longer pegs a CPU core when a running process goes quiet. After a
+  process closed its stdout/stderr but kept running, the pipe's readability
+  handler fired continuously on the permanently-readable EOF condition. The
+  handler now removes itself on EOF (the final bytes are still drained when the
+  process exits), so an idle Wine process no longer spins
+  (Closes nightcap-app/nightcap#917, nightcap-app/nightcap#1010).
+- Moving a bottle no longer wipes its pinned-program list. The `move()` loop
+  was shadowing the bottle's `url` with `pin.url`, causing
+  `updateParentBottle` to compare a pin path against itself instead of the
+  bottle root. Pin paths are now correctly rewritten to point at the new
+  bottle location (Closes nightcap-app/nightcap#830).
+- Right-click "Add to blocklist" no longer creates duplicate entries. The
+  context-menu actions dedupe against the existing blocklist before
+  appending, both for single-row and multi-selection cases
+  (Closes nightcap-app/nightcap#431).
+- DXVK installation no longer stops short when the bundle directory contains a
+  non-DLL file. The copy loop returned on the first non-`.dll` entry (e.g. a
+  stray `.DS_Store`), which could leave some DXVK DLLs uninstalled; it now skips
+  non-DLL entries and continues.
+- Pinning start-menu programs no longer stops at the first already-pinned entry.
+  The pin loop returned early once it found a program already in the pin list,
+  leaving every subsequent start-menu program unpinned; it now skips that entry
+  and continues processing the rest.
+
+### Documentation
+- Added project governance and support docs: `docs/GOVERNANCE.md` (honest single-maintainer
+  continuity stance), `docs/SUPPORT.md` (where to file and what to expect), and
+  `docs/DEPENDENCIES.md` (pinned Wine/DXVK/D3DMetal/DXMT runtime components and their sources).
+- Documented the reproducible runtime-assembly procedure in `docs/ReleaseWorkflow.md` (previously
+  marked "out of scope") and added a weekly `RuntimeTrack` workflow that flags when a bundled runtime
+  component falls behind upstream. The bug-report template now asks reporters to confirm they're on
+  this fork rather than the archived original.
+- `SECURITY.md` now documents how Wine/DXVK runtime vulnerabilities are handled — pinned versions are
+  tracked against upstream, and a critical bundled-component CVE triggers an out-of-band runtime rebuild
+  and release. Added `FUNDING.md` describing the volunteer, single-maintainer sustainability model.
+- Removed the inherited CrossOver affiliate links (`ad=1010`) from the README and funding config; this
+  fork has no affiliate or revenue-sharing arrangement, and those links credited the original project.
+
+## [3.0.1] - 2026-05-01 (App)
+
+### Fixed
+- NightcapWine install hung at "Installing NightcapWine — Almost there" because
+  `Tar.validateArchivePaths` waited for the `tar -tvzf` process to exit before
+  reading its stdout pipe. With the 313 MB Wine Libraries archive the verbose
+  listing easily exceeds the pipe buffer, so tar blocked writing while Nightcap
+  waited for it to finish — a classic pipe deadlock. The pipe is now drained
+  before `waitUntilExit`.
+
+## [3.0.0] - 2026-05-01 (App)
+
+First app release of the active community fork of [nightcap-app/nightcap](https://github.com/nightcap-app/nightcap)
+(archived April 2025). Resolves all 54 v1.0 milestone requirements covering 10 categories of
+upstream issues (#40, #41, #42, #43, #44, #45, #47, #48, #49, #50). Bumps the macOS minimum
+to 15 (Sequoia).
+
+### Added
+- Guided troubleshooting wizard with step-by-step diagnostic flows for 8 issue categories (Issue #50)
+- Terminal application selection: choose between Terminal, iTerm2, or Warp (Refs #47, upstream #911)
+- Duplicate bottle feature for cloning bottles without export/import (Refs #47, upstream #822)
+- App Nap management: disable macOS process throttling for better game performance (Refs #47, upstream #1297)
+- Controller & Input Compatibility settings for game controller detection issues (Issue #42)
+- Toast notifications showing launch success/failure feedback (Refs #49)
+- Archive progress indicator with toast notifications for bottle export (Refs #49, upstream #827)
+- Icon caching for faster program list loading (Refs #49, upstream #941)
+- Improved UX for unavailable bottles with warning icon and quick remove button (Refs #49, upstream #1039)
+- Retry button for failed config values (Build Version, Retina Mode, DPI) (Refs #49, upstream #967)
+- Comprehensive Launcher Compatibility System including detection, diagnostics, and configuration
+- Stability diagnostics export for crash/freeze reports (Refs #40)
+- NightcapWine download/install diagnostics with copy-to-clipboard workflow (Issue #63)
+- SwiftFormat integration for automated code formatting
+- DocC documentation for NightcapKit public API
+- Code coverage reporting and badges
+- GitHub Pages and Releases infrastructure
+- NightcapKit test infrastructure and initial test suite
+- Dependabot configuration for dependency updates
+
+### Changed
+- Refactored shared program launch logic into reusable `LaunchResult` and `launchWithUserMode()` (Issue #68)
+- Refactored `BottleSettings` and `Wine` modules into smaller, focused components
+- Replaced `print()` statements with `os.log` Logger for better debugging
+- Consolidated CI workflows for improved efficiency
+- Implemented proper thread safety by removing `@unchecked Sendable` usage
+- Raised minimum deployment target from macOS 14 (Sonoma) to macOS 15 (Sequoia)
+- AVX toggle and Sequoia compatibility mode are now always visible (no longer gated by OS version)
+
+### Fixed
+- Fixed Terminal launch (shift-click) producing malformed commands due to double-escaping (Issue #71)
+- Fixed localization fallback showing raw keys to non-English users (Refs #49)
+- Fixed NightcapCmd `run` command not launching programs (now uses Wine directly) (Refs #49, upstream #1088, #1140)
+- Corrected Dependabot Swift configuration
+- Capped Wine process logs and pruned old logs to prevent excessive disk usage (Issue #46)
+- Surface bottle creation failures with diagnostic information (Issue #61)
+- Fixed winetricks dependency installs failing when %AppData% is empty (Issue #64)
+- Fixed hardcoded "crossover" username in user profile path detection
+- Added Wine prefix validation before running winetricks with repair option
+
+### Security
+- Process environment logging now records keys only (not values) to avoid persisting secrets in logs
+
+### Removed
+- Unmaintained CLI dependencies (SwiftyTextTable, Progress.swift)
+- Removed `#available(macOS 15, *)` availability checks as macOS 15 is now the minimum
+
+### Documentation
+- Added comprehensive Launcher Troubleshooting and Steam Compatibility guides
+- Removed obsolete Markdown files from the root and `docs/` directory
+- Updated `README.md` and `CONTRIBUTING.md` to reflect current project state
+- Consolidated documentation into the `docs/` directory
+
+## [3.0.0] - 2026-01-18 (Wine Libraries)
+
+### Changed
+- Upgraded Wine from 7.7 to 11.0 (Gcenx stable build) for improved application compatibility
+- Updated DXVK to macOS-compatible v1.10.3
+
+### Fixed
+- Steam "steamwebhelper is not responding" error caused by stubbed WSALookupServiceBegin (Issue #72)
+- Improved networking stack for better launcher compatibility
+
+## [2.5.0] - 2026-01-10
+
+### Added
+- Initial release of Nightcap Wine binaries for this fork
+- Wine/GPTK libraries packaged as `Libraries.tar.gz`
+- GitHub Pages hosting for version metadata
+- Sparkle appcast support for automatic updates
+- Release workflow documentation
+
+### Changed
+- Fork setup with new distribution infrastructure
+- Updated GitHub Pages URLs for the frankea fork
+
+### Documentation
+- Added `RELEASE_WORKFLOW.md` for publishing releases
+- Added `DOCUMENTATION_AUDIT.md` for tracking documentation status
+- Updated `README.md` with fork-specific information
+
+---
+
+## Categories Guide
+
+When adding entries to this changelog, use the following categories:
+
+- **Added** - New features
+- **Changed** - Changes in existing functionality
+- **Deprecated** - Soon-to-be removed features
+- **Removed** - Now removed features
+- **Fixed** - Bug fixes
+- **Security** - Vulnerability fixes
+- **Documentation** - Documentation-only changes
+
+[Unreleased]: https://github.com/gasanache/Nightcap/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/gasanache/Nightcap/releases/tag/v3.0.0
+[2.5.0]: https://github.com/gasanache/Nightcap/releases/tag/v2.5.0

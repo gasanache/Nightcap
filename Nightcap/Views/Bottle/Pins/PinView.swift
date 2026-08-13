@@ -1,0 +1,119 @@
+//
+//  PinView.swift
+//  Nightcap
+//
+//  This file is part of Nightcap.
+//
+//  Nightcap is free software: you can redistribute it and/or modify it under the terms
+//  of the GNU General Public License as published by the Free Software Foundation,
+//  either version 3 of the License, or (at your option) any later version.
+//
+//  Nightcap is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+//  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+//  See the GNU General Public License for more details.
+//
+//  You should have received a copy of the GNU General Public License along with Nightcap.
+//  If not, see https://www.gnu.org/licenses/.
+//
+
+import NightcapKit
+import SwiftUI
+
+struct PinView: View {
+    @ObservedObject var bottle: Bottle
+    @ObservedObject var program: Program
+    @State var pin: PinnedProgram
+    @Binding var path: NavigationPath
+    @Binding var toast: ToastData?
+
+    @State private var image: Image?
+    @State private var showRenameSheet = false
+    @State private var name: String = ""
+    @State private var opening: Bool = false
+
+    var body: some View {
+        VStack {
+            Group {
+                if let image {
+                    image
+                        .resizable()
+                } else {
+                    Image(systemName: "app.dashed")
+                        .resizable()
+                }
+            }
+            .frame(width: 45, height: 45)
+            .scaleEffect(opening ? 2 : 1)
+            .opacity(opening ? 0 : 1)
+            Spacer()
+            Text(name)
+                .multilineTextAlignment(.center)
+                .lineLimit(2, reservesSpace: true)
+        }
+        .frame(width: 90, height: 90)
+        .padding(10)
+        .overlay {
+            HStack {
+                Spacer()
+                Image(systemName: "play.fill")
+                    .resizable()
+                    .foregroundColor(.green)
+                    .frame(width: 16, height: 16)
+            }
+            .frame(width: 45, height: 45)
+            .padding(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
+        }
+        .contextMenu {
+            ProgramMenuView(program: program, path: $path)
+
+            Button("button.rename", systemImage: "pencil.line") {
+                showRenameSheet.toggle()
+            }
+            .labelStyle(.titleAndIcon)
+            Button("button.showInFinder", systemImage: "folder") {
+                NSWorkspace.shared.activateFileViewerSelecting([program.url])
+            }
+            .labelStyle(.titleAndIcon)
+        }
+        .onTapGesture(count: 2) {
+            runProgram()
+        }
+        .sheet(isPresented: $showRenameSheet) {
+            RenameView("rename.pin.title", name: name) { newName in
+                name = newName
+            }
+        }
+        .task {
+            name = pin.name
+            let icon = await IconCache.shared.iconOrFallback(for: program.url, peFile: program.peFile)
+            self.image = Image(nsImage: icon)
+        }
+        .onChange(of: name) {
+            if let index = bottle.settings.pins.firstIndex(where: {
+                let exists = FileManager.default.fileExists(atPath: pin.url?.path(percentEncoded: false) ?? "")
+                return $0.url == pin.url && exists
+            }) {
+                bottle.settings.pins[index].name = name
+            }
+        }
+    }
+
+    func runProgram() {
+        withAnimation(.easeIn(duration: 0.25)) {
+            opening = true
+        } completion: {
+            withAnimation(.easeOut(duration: 0.1)) {
+                opening = false
+            }
+        }
+
+        // Capture modifier flags synchronously before entering async context
+        let useTerminal = NSEvent.modifierFlags.contains(.shift)
+        Task {
+            let result = await program.launchWithUserMode(useTerminal: useTerminal)
+            withAnimation {
+                toast = result.toastData
+            }
+        }
+    }
+}
