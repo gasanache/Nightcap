@@ -34,7 +34,7 @@ final class DistributionConfigTests: XCTestCase {
     // MARK: - Version Plist URL Tests
 
     func testVersionPlistURL() {
-        let expectedURL = "https://github.com/gasanache/Nightcap/releases/download/runtime/WhiskyWineVersion.plist"
+        let expectedURL = "https://github.com/gasanache/Nightcap/releases/download/dependencies/WhiskyWineVersion.plist"
         XCTAssertEqual(DistributionConfig.versionPlistURL, expectedURL)
     }
 
@@ -155,8 +155,8 @@ final class DistributionConfigTests: XCTestCase {
         )
         XCTAssertEqual(
             expectedURL,
-            "https://github.com/gasanache/Nightcap/releases/download/runtime/WhiskyWineVersion.plist",
-            "NightcapWineInstaller should use GitHub Pages URL"
+            "https://github.com/gasanache/Nightcap/releases/download/dependencies/WhiskyWineVersion.plist",
+            "NightcapWineInstaller should use the dependencies release URL"
         )
     }
 
