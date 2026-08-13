@@ -65,10 +65,12 @@ struct GPTKSettingsSection: View {
                 .foregroundStyle(.secondary)
         }
         .task {
-            await Task.detached(priority: .utility) {
-                GPTKImporter.deployStoredPayloadIfCapable()
-            }.value
-            refresh()
+            await deployAndRefresh()
+        }
+        // A new engine may have just become capable of running the stored
+        // payload, so try deploying again rather than waiting for a reopen.
+        .onReceive(NotificationCenter.default.publisher(for: .runtimeChanged)) { _ in
+            Task { await deployAndRefresh() }
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -88,6 +90,15 @@ struct GPTKSettingsSection: View {
         } message: {
             Text(importError ?? "")
         }
+    }
+
+    /// Deploys the stored payload if the engine can run it, then reloads what
+    /// this section shows.
+    private func deployAndRefresh() async {
+        await Task.detached(priority: .utility) {
+            GPTKImporter.deployStoredPayloadIfCapable()
+        }.value
+        refresh()
     }
 
     private func refresh() {

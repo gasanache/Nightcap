@@ -45,8 +45,14 @@ private struct EngineInstallFlowModifier: ViewModifier {
                 showSetup = true
             }
             .onChange(of: showSetup) { _, isShowing in
+                guard !isShowing else { return }
                 // The choice belongs to one run of setup, not to the next.
-                if !isShowing { requestedEngine = nil }
+                requestedEngine = nil
+                // Setup may have replaced the runtime, so everything reporting
+                // which engine is installed is now stale. Without this the
+                // engine list and the GPTK section keep showing the old one
+                // until Settings is closed and reopened.
+                NotificationCenter.default.post(name: .runtimeChanged, object: nil)
             }
     }
 }
