@@ -98,52 +98,6 @@ struct NightcapWineDownloadView: View {
 }
 
 extension NightcapWineDownloadView {
-    private func errorView(error: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "xmark.circle")
-                .resizable()
-                .foregroundStyle(.red)
-                .frame(width: 80, height: 80)
-                .padding(.bottom, 8)
-            Text(error)
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-
-            HStack(spacing: 12) {
-                Button("setup.nightcapwine.copyDiagnostics") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(
-                        diagnostics.reportString(stage: "download", error: error),
-                        forType: .string
-                    )
-                }
-                .buttonStyle(.bordered)
-
-                Button("open.logs") {
-                    NightcapApp.openLogsFolder()
-                }
-                .buttonStyle(.bordered)
-            }
-
-            HStack(spacing: 12) {
-                Button("setup.retry") {
-                    retryDownload()
-                }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-
-                Button("setup.quit") {
-                    showSetup = false
-                }
-                .buttonStyle(.bordered)
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.top, 8)
-        }
-        .padding()
-    }
-
     /// Transferred-so-far text, shown against the active step rather than
     /// under the bar, so the row says what it is waiting on.
     var transferredDetail: String? {
@@ -181,7 +135,9 @@ extension NightcapWineDownloadView {
 
     /// Resets the UI and starts over. Partial download data stays on disk, so
     /// the new attempt resumes from wherever the failed one stopped.
-    private func retryDownload() {
+    ///
+    /// Not private: the failure view lives in its own file.
+    func retryDownload() {
         downloadFailure = nil
         fractionProgress = 0
         completedBytes = 0
