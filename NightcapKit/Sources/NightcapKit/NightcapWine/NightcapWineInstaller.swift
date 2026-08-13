@@ -349,7 +349,18 @@ public class NightcapWineInstaller {
                         if error == nil, let data {
                             let decoder = PropertyListDecoder()
                             let remoteInfo = try decoder.decode(NightcapWineVersion.self, from: data)
-                            let remoteVersion = remoteInfo.version
+                            // Compare within the installed engine's own
+                            // lineage. The engines are a trade, not a
+                            // progression -- the GPTK-capable build is 4.x and
+                            // the default is 3.x -- so comparing against the
+                            // manifest root tells a GPTK user their 4.0.0 is
+                            // ahead of 3.1.1 and they never hear about an
+                            // update to their own engine again.
+                            let installedIsGPTK = nightcapWineInfo()?.gptkCapable == true
+                            let lineage = remoteInfo.availableEngines.first {
+                                ($0.gptkCapable == true) == installedIsGPTK
+                            }
+                            let remoteVersion = (lineage ?? remoteInfo).version
 
                             continuation.resume(returning: remoteVersion)
                             return
