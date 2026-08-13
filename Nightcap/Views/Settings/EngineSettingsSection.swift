@@ -23,6 +23,11 @@ import SwiftUI
 /// Asks the app to install a particular Wine engine, carrying its version.
 extension Notification.Name {
     static let installEngineRequested = Notification.Name("installEngineRequested")
+
+    /// Posted once setup closes, so anything showing runtime state reloads.
+    /// Without it the engine list and the GPTK section keep reporting whatever
+    /// was installed when they first appeared, and only a reopen corrects them.
+    static let runtimeChanged = Notification.Name("runtimeChanged")
 }
 
 /// Lets the user choose which Wine engine is installed.
@@ -50,19 +55,57 @@ struct EngineSettingsSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(engines, id: \.releaseTag) { engine in
+                // Keyed on the archive, not the tag: every engine now ships
+                // from the same release, so the tag stopped being unique and
+                // SwiftUI rendered the first engine once per entry.
+                ForEach(engines, id: \.downloadURL) { engine in
                     row(for: engine)
                 }
             }
         } header: {
             Text("Wine engine")
         } footer: {
-            Text("Changing engine replaces the installed runtime. Bottles, imported payloads and "
-                + "supplied libraries are kept — they live outside it.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Changing engine replaces the installed runtime. Bottles, imported payloads and "
+                    + "supplied libraries are kept — they live outside it.")
+                metalChecklist
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
         .task { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .runtimeChanged)) { _ in
+            Task { await load() }
+        }
+    }
+
+    /// Metal takes two separate pieces and each screen only knows its own half,
+    /// so having one without the other reads as broken. This is the one place
+    /// that says what is still missing.
+    @ViewBuilder
+    private var metalChecklist: some View {
+        let engineReady = installed?.gptkCapable == true
+        let payloadReady = GPTKImporter.storedRecord() != nil
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Direct3D 12 on Metal needs both:")
+                .fontWeight(.medium)
+            checklistLine(done: engineReady, text: "The GPTK-capable engine, installed above")
+            checklistLine(done: payloadReady, text: "Apple's Game Porting Toolkit, imported below")
+            if engineReady, payloadReady {
+                Text("Both present — D3DMetal is selectable in Bottle Configuration.")
+            } else {
+                Text("Direct3D 11 titles reach Metal through DXMT on either engine, "
+                    + "and need neither of these.")
+            }
+        }
+    }
+
+    private func checklistLine(done: Bool, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(done ? Color.green : Color.secondary)
+            Text(text)
+        }
     }
 
     private func row(for engine: NightcapWineVersion) -> some View {
@@ -94,10 +137,14 @@ struct EngineSettingsSection: View {
     }
 
     /// What taking this engine actually gets you, rather than a version alone.
+    ///
+    /// The number is the runtime package's, not Wine's — runtime 3.1.1 carries
+    /// Wine 11 — so it is labelled as such rather than reading as a Wine
+    /// version that would be years out of date.
     private func describe(_ engine: NightcapWineVersion) -> String {
-        var parts = ["Wine \(engine.version.major).\(engine.version.minor)"]
+        var parts = ["Runtime \(engine.version.major).\(engine.version.minor).\(engine.version.patch)"]
         if engine.gptkCapable == true {
-            parts.append("runs D3DMetal with your own GPTK import")
+            parts.append("older Wine, runs D3DMetal with your own GPTK import")
         } else {
             parts.append("newer Wine, no D3DMetal")
         }

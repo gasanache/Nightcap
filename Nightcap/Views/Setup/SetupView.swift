@@ -67,9 +67,13 @@ struct SetupView: View {
         .padding()
         .interactiveDismissDisabled()
         .onAppear {
-            // A re-entry into setup with the runtime missing has nothing to show
-            // on the welcome screen, so go straight to the download stage.
-            if !firstTime, !NightcapWineInstaller.isNightcapWineInstalled() {
+            // A re-entry into setup has nothing to say on the welcome screen:
+            // either the runtime is missing, or a particular engine was asked
+            // for. Without that second case, choosing an engine while one is
+            // already installed lands on "everything is ready" and the engine
+            // that was asked for never downloads.
+            guard !firstTime else { return }
+            if targetEngineVersion != nil || !NightcapWineInstaller.isNightcapWineInstalled() {
                 path = [.nightcapWineDownload]
             }
         }
