@@ -104,7 +104,7 @@ final class LauncherDiagnosticsTests: XCTestCase {
         XCTAssertNotNil(env["STEAM_DISABLE_CEF_SANDBOX"])
         XCTAssertNotNil(env["LC_ALL"])
         XCTAssertNotNil(env["GPU_VENDOR_ID"])
-        XCTAssertNotNil(env["WINHTTP_CONNECT_TIMEOUT"])
+        XCTAssertNil(env["WINHTTP_CONNECT_TIMEOUT"], "Placebo variable was removed; nothing shipped reads it")
     }
 
     func testEnvironmentVariablesWithoutLauncherCompatibility() throws {
@@ -153,12 +153,12 @@ final class LauncherDiagnosticsTests: XCTestCase {
         bottle.settings.networkTimeout = 30_000 // Minimum
         var env1: [String: String] = [:]
         bottle.settings.environmentVariables(wineEnv: &env1)
-        XCTAssertEqual(env1["WINHTTP_CONNECT_TIMEOUT"], "30000")
+        XCTAssertNil(env1["WINHTTP_CONNECT_TIMEOUT"])
 
         bottle.settings.networkTimeout = 180_000 // Maximum
         var env2: [String: String] = [:]
         bottle.settings.environmentVariables(wineEnv: &env2)
-        XCTAssertEqual(env2["WINHTTP_CONNECT_TIMEOUT"], "180000")
+        XCTAssertNil(env2["WINHTTP_CONNECT_TIMEOUT"])
 
         bottle.settings.networkTimeout = 60_000 // Default (should not set)
         var env3: [String: String] = [:]
@@ -370,8 +370,8 @@ final class LauncherDiagnosticsTests: XCTestCase {
         bottle.settings.environmentVariables(wineEnv: &env)
 
         // Custom timeout should be applied
-        XCTAssertEqual(env["WINHTTP_CONNECT_TIMEOUT"], "120000")
-        XCTAssertEqual(env["WINHTTP_RECEIVE_TIMEOUT"], "240000") // 2x connect timeout
+        XCTAssertNil(env["WINHTTP_CONNECT_TIMEOUT"])
+        XCTAssertNil(env["WINHTTP_RECEIVE_TIMEOUT"])
     }
 
     // MARK: - Auto-Enable DXVK Tests
@@ -574,10 +574,10 @@ final class LauncherDiagnosticsTests: XCTestCase {
         bottle.settings.environmentVariables(wineEnv: &env)
 
         // Connection pooling fixes should always be applied when launcher compat is on
-        XCTAssertEqual(env["WINE_MAX_CONNECTIONS_PER_SERVER"], "10")
-        XCTAssertEqual(env["WINE_FORCE_HTTP11"], "1")
-        XCTAssertEqual(env["WINE_ENABLE_SSL"], "1")
-        XCTAssertEqual(env["WINE_SSL_VERSION_MIN"], "TLS1.2")
+        XCTAssertNil(env["WINE_MAX_CONNECTIONS_PER_SERVER"])
+        XCTAssertNil(env["WINE_FORCE_HTTP11"])
+        XCTAssertNil(env["WINE_ENABLE_SSL"])
+        XCTAssertNil(env["WINE_SSL_VERSION_MIN"])
     }
 }
 

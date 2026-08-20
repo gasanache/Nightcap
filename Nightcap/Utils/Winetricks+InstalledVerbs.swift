@@ -93,12 +93,7 @@ extension Winetricks {
             return nil
         }
 
-        let verbs = Set(
-            output
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-        )
+        let verbs = Self.verbNames(from: output)
 
         if verbs.isEmpty {
             return nil
@@ -106,6 +101,35 @@ extension Winetricks {
 
         logger.debug("winetricks list-installed found \(verbs.count) verbs")
         return verbs
+    }
+
+    /// The verb names in a block of winetricks output.
+    ///
+    /// Winetricks writes its banner to stdout alongside the list — the
+    /// taskset/cpuset warning, the "Using winetricks <date> - sha256sum: …"
+    /// line — and the previous parse took every non-empty line as a verb, so
+    /// those banners were cached and counted as installed components. The log
+    /// also records some entries with an argument ("remove_mono internal"),
+    /// where only the first token is the verb.
+    ///
+    /// A verb is one lowercase token: letters, digits, `_`, `.`, `+` or `-`.
+    /// Anything else is winetricks talking, not a verb.
+    static func verbNames(from output: String) -> Set<String> {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789_.+-")
+        let names = output
+            .components(separatedBy: .newlines)
+            .compactMap { line -> String? in
+                guard let token = line
+                    .trimmingCharacters(in: .whitespaces)
+                    .components(separatedBy: .whitespaces)
+                    .first,
+                    !token.isEmpty,
+                    token.rangeOfCharacter(from: allowed.inverted) == nil,
+                    token.first?.isLetter == true || token.first?.isNumber == true
+                else { return nil }
+                return token
+            }
+        return Set(names)
     }
 
     /// Parses the winetricks.log file as a fallback verb discovery method.
@@ -181,7 +205,11 @@ extension Winetricks {
             currentLogSize: logInfo.size,
             currentLogModDate: logInfo.modDate
         ) {
-            return (cache.installedVerbs, true)
+            // Sanitised on the way out as well as in: caches written before
+            // `verbNames(from:)` existed hold winetricks' banner lines as
+            // though they were verbs, and they stay valid until the prefix
+            // changes. Filtering here heals them without a forced re-scan.
+            return (Self.verbNames(from: cache.installedVerbs.joined(separator: "\n")), true)
         }
 
         // Cache is stale or missing; try list-installed first

@@ -36,7 +36,17 @@ private struct BottomBarViewModifier<BarContent: View>: ViewModifier {
                     Divider()
                     barContent
                 }
-                .background(.regularMaterial)
+                // The pane's own background, not a material.
+                //
+                // `.regularMaterial` drew a grey slab — 230 grey against a pure
+                // white pane in light mode — that stopped dead at the sidebar,
+                // because a bar in the detail pane cannot span the window. Next
+                // to the floating sidebar's rounded bottom corner that read as
+                // an unfinished join rather than a bar. Matching the pane means
+                // the only edge left is the Divider, which is the one that is
+                // supposed to be there. Still opaque, so content scrolling
+                // underneath stays hidden.
+                .background(.background)
                 .buttonStyle(BottomBarButtonStyle())
             }
     }

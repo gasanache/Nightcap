@@ -353,16 +353,34 @@ public class Wine {
             launchArgs = ["start", "/unix", url.path(percentEncoded: false)] + args
         }
 
+        // The launch is registered so the app can see it: the registry fed the
+        // Processes badge, the close-with-processes policy and the display-wake
+        // assertion, yet nothing ever wrote to it, so all three sat on an empty
+        // store. The entry lives for the `wine start` launcher's lifetime —
+        // the spawned program itself continues under wineserver, which the
+        // tasklist poll and `isWineserverRunning` cover.
+        let launchProcess = Process()
+        launchProcess.executableURL = wineBinary
+        launchProcess.arguments = launchArgs
+        launchProcess.currentDirectoryURL = wineBinary.deletingLastPathComponent()
+        launchProcess.environment = wineEnvironment
+        launchProcess.qualityOfService = .userInitiated
+
+        ProcessRegistry.shared.register(process: launchProcess, bottle: bottle, programName: programName)
+
         var exitCode: Int32 = 0
-        for await output in try runProcess(
-            name: programName,
-            args: launchArgs,
-            environment: wineEnvironment, executableURL: wineBinary,
-            fileHandle: fileHandle
-        ) {
-            if case let .terminated(code) = output {
-                exitCode = code
+        do {
+            let stream = try launchProcess.runStream(name: programName, fileHandle: fileHandle)
+            ProcessRegistry.shared.updatePID(pid: launchProcess.processIdentifier, for: launchProcess)
+            for await output in stream {
+                if case let .terminated(code) = output {
+                    exitCode = code
+                }
             }
+            ProcessRegistry.shared.unregister(pid: launchProcess.processIdentifier)
+        } catch {
+            ProcessRegistry.shared.unregister(pid: launchProcess.processIdentifier)
+            throw error
         }
 
         // Update the run log entry with exit information

@@ -25,11 +25,22 @@ enum LoadingState: Equatable {
     case failed
 }
 
+/// A setting whose current value has to be read off the Wine prefix before the
+/// control for it means anything.
+///
+/// This was ``NCRow`` written earlier and worse — its own 2pt spacing, its own
+/// idea of caption type, and nowhere to put a machine value — so it is now a
+/// thin wrapper over the real row. What it keeps is the one thing ``NCRow`` has
+/// no opinion about: the read may still be in flight, or it may have failed,
+/// and the trailing side of the row has to say which.
 struct SettingItemView<Content: View>: View {
     let title: String.LocalizationValue
     /// Optional one-line explanation shown beneath the title, so users can make
     /// an informed choice without external docs.
     var description: String.LocalizationValue?
+    /// Machine-readable detail read back off the prefix — a registry value, a
+    /// build number. A runtime `String`, never a key.
+    var machine: String?
     let loadingState: LoadingState
     var onRetry: (() -> Void)?
     @ViewBuilder var content: () -> Content
@@ -38,47 +49,52 @@ struct SettingItemView<Content: View>: View {
     @Namespace private var progressViewId
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(String(localized: title))
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let description {
-                    Text(String(localized: description))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
+        NCRow(
+            title: String(localized: title),
+            caption: description.map { String(localized: $0) },
+            machine: machine
+        ) {
+            accessory
+        }
+    }
 
-            HStack {
-                switch loadingState {
-                case .loading, .modifying:
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .controlSize(.small)
-                        .matchedGeometryEffect(id: progressViewId, in: viewId)
-                case .success:
-                    content()
-                        .labelsHidden()
-                        .disabled(loadingState != .success)
-                case .failed:
-                    HStack(spacing: 4) {
-                        Text("config.notAvailable")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if let onRetry {
-                            Button(action: onRetry) {
-                                Image(systemName: "arrow.clockwise")
-                                    .font(.caption)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("config.retry")
-                        }
-                    }
+    /// The reason this wrapper still exists: a spinner while the value is being
+    /// read, the control once it is known, and an honest failure with the retry
+    /// beside it when the read did not work.
+    private var accessory: some View {
+        HStack {
+            switch loadingState {
+            case .loading, .modifying:
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+                    .matchedGeometryEffect(id: progressViewId, in: viewId)
+            case .success:
+                content()
+                    .labelsHidden()
+                    // This gate is what keeps every control in the Wine section
+                    // inert until its value has actually been read.
+                    .disabled(loadingState != .success)
+            case .failed:
+                failureAccessory
+            }
+        }
+        .animation(.default, value: loadingState)
+    }
+
+    /// A failed read said the way the rest of the app says it, rather than as
+    /// grey text that could be mistaken for the value itself.
+    private var failureAccessory: some View {
+        HStack(spacing: Theme.Space.tight) {
+            NCStatusBadge(status: .failed, label: "config.notAvailable")
+            if let onRetry {
+                Button(action: onRetry) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(Theme.Typography.rowCaption)
                 }
-            }.animation(.default, value: loadingState)
+                .buttonStyle(.borderless)
+                .help("config.retry")
+            }
         }
     }
 }

@@ -113,6 +113,19 @@ public extension Program {
                 )
             }
 
+            // A non-zero exit from `wine start` used to fall through to the
+            // success return, so a program that died on the spot still got a
+            // green "Launched" toast.
+            if result.exitCode != 0 {
+                return .launchFailed(
+                    programName: self.name,
+                    errorDescription: String(
+                        format: String(localized: "launch.exitCode %d"),
+                        result.exitCode
+                    )
+                )
+            }
+
             return .launchedSuccessfully(programName: self.name)
         } catch {
             return .launchFailed(programName: self.name, errorDescription: error.localizedDescription)

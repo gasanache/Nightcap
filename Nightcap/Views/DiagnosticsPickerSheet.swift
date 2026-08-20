@@ -21,10 +21,19 @@ import SwiftUI
 
 // MARK: - Crash Diagnosis Banner State
 
-struct CrashDiagnosisBannerState {
+struct CrashDiagnosisBannerState: Equatable {
     let diagnosis: CrashDiagnosis
     let programName: String
+    /// The crashed executable's path, verbatim from the notification. The old
+    /// code reconstructed it from the log folder, which never contains a
+    /// bottle path — so the Troubleshoot button always fell through to the
+    /// generic picker, discarding the program it had been told about.
+    let programPath: String
     let logFileURL: URL
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.programPath == rhs.programPath && lhs.logFileURL == rhs.logFileURL
+    }
 }
 
 // MARK: - Diagnostics Picker Sheet
@@ -94,7 +103,8 @@ struct DiagnosticsPickerSheet: View {
                     logText: resultLogText,
                     programName: program.name,
                     bottleName: selectedBottle?.settings.name ?? "",
-                    timestamp: Date()
+                    timestamp: Date(),
+                    bottle: selectedBottle
                 )
                 .frame(minWidth: 600, minHeight: 400)
             }

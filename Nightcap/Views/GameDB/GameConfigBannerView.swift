@@ -27,16 +27,43 @@ struct GameConfigBannerView: View {
     @ObservedObject var bottle: Bottle
     let programURL: URL?
     @State private var isDismissed: Bool = false
+
+    /// The sibling dependency banner's dismissal persists; this one was plain
+    /// view state, so "Not this" came back on every visit. Keyed per program
+    /// so dismissing one game's match does not hide another's.
+    private var dismissalKey: String {
+        "gameConfigBannerDismissed:\(programURL?.path ?? matchResult.entry.id)"
+    }
+
     @State private var showDetail: Bool = false
     @State private var showExplanation: Bool = false
 
     var body: some View {
         if !isDismissed {
             bannerContent
+                .onAppear(perform: restoreDismissal)
                 .sheet(isPresented: $showDetail) {
-                    GameEntryDetailView(entry: matchResult.entry, bottle: bottle)
-                        .frame(minWidth: 600, minHeight: 500)
+                    // As a sheet this view had no dismiss control at all: the
+                    // only exits were deeper (Apply) or nothing. The stack
+                    // gives its navigationTitle a bar to live in and the bar a
+                    // Close that Escape reaches.
+                    NavigationStack {
+                        GameEntryDetailView(entry: matchResult.entry, bottle: bottle)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("button.close") { showDetail = false }
+                                        .keyboardShortcut(.cancelAction)
+                                }
+                            }
+                    }
+                    .frame(minWidth: 600, minHeight: 500)
                 }
+        }
+    }
+
+    private func restoreDismissal() {
+        if !isDismissed, UserDefaults.standard.bool(forKey: dismissalKey) {
+            isDismissed = true
         }
     }
 
@@ -74,6 +101,7 @@ struct GameConfigBannerView: View {
             Button {
                 withAnimation {
                     isDismissed = true
+                    UserDefaults.standard.set(true, forKey: dismissalKey)
                 }
             } label: {
                 Image(systemName: "xmark")

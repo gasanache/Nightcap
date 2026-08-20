@@ -29,13 +29,14 @@ enum BottleStage {
 }
 
 struct BottleView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     @ObservedObject var bottle: Bottle
     @State private var path = NavigationPath()
     @State private var programLoading: Bool = false
     @State private var hasSteamLibrary: Bool = false
     @State private var showWinetricksSheet: Bool = false
     @State private var showDuplicate: Bool = false
-    @State private var toast: ToastData?
 
     private let gridLayout = [GridItem(.adaptive(minimum: 100, maximum: .infinity))]
 
@@ -48,51 +49,13 @@ struct BottleView: View {
                             bottle: bottle,
                             program: pinnedProgram.program,
                             pin: pinnedProgram.pin,
-                            path: $path,
-                            toast: $toast
+                            path: $path
                         )
                     }
                     PinAddView(bottle: bottle)
                 }
                 .padding()
-                Form {
-                    NavigationLink(value: BottleStage.programs) {
-                        Label("tab.programs", systemImage: "list.bullet")
-                    }
-                    .accessibilityIdentifier("nav.installedPrograms")
-                    if hasSteamLibrary {
-                        NavigationLink(value: BottleStage.steamLibrary) {
-                            Label("tab.steamLibrary", systemImage: "gamecontroller")
-                        }
-                        .accessibilityIdentifier("nav.steamLibrary")
-                    }
-                    NavigationLink(value: BottleStage.config) {
-                        Label("tab.config", systemImage: "gearshape")
-                    }
-                    .accessibilityIdentifier("nav.bottleConfiguration")
-                    NavigationLink(value: BottleStage.processes) {
-                        HStack {
-                            Label("tab.processes", systemImage: "hockey.puck.circle")
-                            let count = ProcessRegistry.shared.getProcessCount(for: bottle)
-                            if count > 0 {
-                                Text("\(count)")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(.blue.opacity(0.15))
-                                    .clipShape(Capsule())
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                    }
-                    .accessibilityIdentifier("nav.runningProcesses")
-                    NavigationLink(value: BottleStage.gameConfigs) {
-                        Label("tab.gameConfigs", systemImage: "slider.horizontal.3")
-                    }
-                    .accessibilityIdentifier("nav.gameConfigurations")
-                }
-                .formStyle(.grouped)
-                .scrollDisabled(true)
+                navigationRows
             }
             .bottomBar {
                 HStack {
@@ -142,11 +105,11 @@ struct BottleView: View {
                                             }
                                             await MainActor.run {
                                                 withAnimation {
-                                                    toast = ToastData(
-                                                        message: String(
+                                                    toastCentre.show(
+                                                        String(
                                                             localized: "status.launched \(url.lastPathComponent)"
                                                         ),
-                                                        style: .success
+                                                        status: .ready
                                                     )
                                                 }
                                             }
@@ -154,12 +117,11 @@ struct BottleView: View {
                                             let errDesc = error.localizedDescription
                                             await MainActor.run {
                                                 withAnimation {
-                                                    toast = ToastData(
-                                                        message: String(
+                                                    toastCentre.show(
+                                                        String(
                                                             localized: "status.launchFailed \(errDesc)"
                                                         ),
-                                                        style: .error,
-                                                        autoDismiss: false
+                                                        status: .failed, persistent: true
                                                     )
                                                 }
                                             }
@@ -201,7 +163,6 @@ struct BottleView: View {
                     : ""
             )
             .accessibilityIdentifier("bottleDetail")
-            .toast($toast)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("button.duplicateBottle", systemImage: "doc.on.doc") {
@@ -226,24 +187,26 @@ struct BottleView: View {
                             _ = try await bottle.duplicate(newName: newName)
                             await MainActor.run {
                                 withAnimation {
-                                    toast = ToastData(
-                                        message: String(
+                                    toastCentre.show(
+                                        String(
                                             format: String(localized: "status.duplicateSuccess %@"),
                                             newName
                                         ),
-                                        style: .success
+                                        status: .ready
                                     )
                                 }
                             }
+                        } catch is CancellationError {
+                            // The running-process guard was declined.
                         } catch {
                             await MainActor.run {
                                 withAnimation {
-                                    toast = ToastData(
-                                        message: String(
+                                    toastCentre.show(
+                                        String(
                                             format: String(localized: "status.duplicateFailed %@"),
                                             error.localizedDescription
                                         ),
-                                        style: .error
+                                        status: .failed
                                     )
                                 }
                             }
@@ -283,6 +246,93 @@ struct BottleView: View {
                 ProgramView(program: program)
             }
         }
+    }
+}
+
+// The navigation list lives in an extension rather than the main body: the
+// struct was already at the type-length limit, and captions pushed it over.
+extension BottleView {
+    /// Where the rest of the bottle lives.
+    ///
+    /// These were bare `Label`s inside a `.grouped` Form with scrolling
+    /// disabled, nested in a ScrollView — so they read as a detached grey slab,
+    /// and a grouped Form has no slot for the caption or count each row wants.
+    /// A plain stack of ``NCLinkRow`` gives them both and lets the page scroll
+    /// as one thing.
+    private var navigationRows: some View {
+        VStack(spacing: 0) {
+            navigationRow(
+                .programs,
+                title: "tab.programs",
+                caption: "nav.programs.caption",
+                symbol: "list.bullet",
+                identifier: "nav.installedPrograms"
+            )
+            if hasSteamLibrary {
+                Divider().padding(.leading, Theme.Space.card)
+                navigationRow(
+                    .steamLibrary,
+                    title: "tab.steamLibrary",
+                    caption: "nav.steamLibrary.caption",
+                    symbol: "gamecontroller",
+                    identifier: "nav.steamLibrary"
+                )
+            }
+            Divider().padding(.leading, Theme.Space.card)
+            navigationRow(
+                .config,
+                title: "tab.config",
+                caption: "nav.config.caption",
+                symbol: "gearshape",
+                identifier: "nav.bottleConfiguration"
+            )
+            Divider().padding(.leading, Theme.Space.card)
+            NavigationLink(value: BottleStage.processes) {
+                NCLinkRow(
+                    title: "tab.processes",
+                    caption: "nav.processes.caption",
+                    systemImage: "hockey.puck.circle"
+                ) {
+                    // Self-hiding at zero, so this is unconditional where the
+                    // hand-rolled capsule needed a `count > 0` around it.
+                    NCCountBadge(count: runningCount, tint: NCStatus.running.tint)
+                }
+                .padding(.horizontal, Theme.Space.card)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("nav.runningProcesses")
+            Divider().padding(.leading, Theme.Space.card)
+            navigationRow(
+                .gameConfigs,
+                title: "tab.gameConfigs",
+                caption: "nav.gameConfigs.caption",
+                symbol: "slider.horizontal.3",
+                identifier: "nav.gameConfigurations"
+            )
+        }
+        .background(.quaternary.opacity(0.25))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+        .padding(.horizontal)
+        .padding(.bottom)
+    }
+
+    private func navigationRow(
+        _ stage: BottleStage,
+        title: LocalizedStringKey,
+        caption: LocalizedStringKey,
+        symbol: String,
+        identifier: String
+    ) -> some View {
+        NavigationLink(value: stage) {
+            NCLinkRow(title: title, caption: caption, systemImage: symbol)
+                .padding(.horizontal, Theme.Space.card)
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
+    }
+
+    private var runningCount: Int {
+        ProcessRegistry.shared.getProcessCount(for: bottle)
     }
 }
 

@@ -44,63 +44,12 @@ struct SystemLibraryConfigSection: View {
     private var catalog: [SystemLibraryRequirement] { SystemLibraryCatalog.known }
 
     var body: some View {
-        Section {
-            ForEach(catalog, id: \.name) { requirement in
-                libraryRow(requirement)
-            }
-
-            if let errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            Divider()
-
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Import automatically from")
-                        .font(.caption)
-                    Text(sourceFolderPath.isEmpty
-                        ? "No folder chosen — you will be asked for each library"
-                        : abbreviatedSourcePath)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
-                if !sourceFolderPath.isEmpty {
-                    Button("Forget") { sourceFolderPath = "" }
-                        .controlSize(.small)
-                }
-                Button(sourceFolderPath.isEmpty ? "Choose\u{2026}" : "Change\u{2026}") {
-                    isChoosingFolder = true
-                }
-                .controlSize(.small)
-            }
-
-            Text(
-                "Microsoft does not permit these to be redistributed, so Nightcap cannot include them. "
-                    + "Point it at a folder holding them — a copy from a Windows PC, or a mounted "
-                    + "Windows volume — and they are picked up on their own from then on."
-            )
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-        } header: {
-            HStack {
-                Label("Windows Libraries", systemImage: "building.columns")
-                Spacer()
-                Button {
-                    refresh()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.borderless)
-                .help("Re-check which libraries are in this bottle")
-            }
-        }
+        NCSection(
+            title: "systemLibrary.section",
+            systemImage: "building.columns",
+            accessory: { headerAccessory },
+            content: { sectionContent }
+        )
         // Keyed on the bottle rather than onAppear: switching bottles in the
         // sidebar reuses this view, and onAppear would not fire again, leaving
         // the previous bottle's status on screen.
@@ -123,53 +72,120 @@ struct SystemLibraryConfigSection: View {
         }
     }
 
+    // MARK: - Header
+
+    /// The one control that acts on the section as a whole, in the slot
+    /// ``NCSectionHeader`` keeps for it — this was a `Label`, a `Spacer` and a
+    /// `Button` hand-assembled in a `header:` closure.
+    private var headerAccessory: some View {
+        Button {
+            refresh()
+        } label: {
+            Label("button.refresh", systemImage: "arrow.clockwise")
+                .labelStyle(.iconOnly)
+        }
+        .buttonStyle(.borderless)
+        .help("systemLibrary.refresh.help")
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var sectionContent: some View {
+        ForEach(catalog, id: \.name) { requirement in
+            libraryRow(requirement)
+        }
+
+        if let errorMessage {
+            Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+
+        Divider()
+
+        sourceFolderRow
+
+        // Why the app cannot simply ship these. It is the reason the whole
+        // section exists rather than an aside, so it carries a notice's tint
+        // instead of being the smallest text on the page.
+        NCNotice(
+            status: .unknown,
+            message: String(localized: "systemLibrary.redistribution")
+        )
+    }
+
+    private var sourceFolderRow: some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("systemLibrary.autoImport.title")
+                    .font(.caption)
+                Text(sourceFolderPath.isEmpty
+                    ? String(localized: "systemLibrary.autoImport.none")
+                    : abbreviatedSourcePath)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            if !sourceFolderPath.isEmpty {
+                Button("systemLibrary.autoImport.forget") { sourceFolderPath = "" }
+                    .controlSize(.small)
+            }
+            Button(sourceFolderPath.isEmpty
+                ? String(localized: "systemLibrary.autoImport.choose")
+                : String(localized: "systemLibrary.autoImport.change")) {
+                    isChoosingFolder = true
+                }
+                .controlSize(.small)
+        }
+    }
+
     // MARK: - Row
 
     private func libraryRow(_ requirement: SystemLibraryRequirement) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(requirement.name)
-                        .font(.system(.body, design: .monospaced))
-                    if let reason = requirement.reason {
-                        Text(reason)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Spacer()
-
-                statusBadge(for: requirement)
-                actionButton(for: requirement)
-            }
-
-            // Only worth showing while it is still missing; once supplied,
-            // repeating where it came from is noise.
-            if !inStore.contains(requirement.name), let hint = requirement.sourceHint {
-                Text("Copy from \(hint)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .textSelection(.enabled)
-            }
+        NCRow(
+            title: requirement.name,
+            caption: rowCaption(for: requirement),
+            // The path is a real machine value, so it keeps the monospaced slot
+            // and middle truncation. Only shown while still missing: once
+            // supplied, repeating where it came from is noise.
+            machine: inStore.contains(requirement.name) ? nil : requirement.sourceHint,
+            isMachineTitle: true
+        ) {
+            NCStatusBadge(status: status(for: requirement), label: statusLabel(for: requirement))
+            actionButton(for: requirement)
         }
-        .padding(.vertical, 2)
     }
 
-    @ViewBuilder
-    private func statusBadge(for requirement: SystemLibraryRequirement) -> some View {
+    /// Reason plus, while it is still missing, what to do about it.
+    private func rowCaption(for requirement: SystemLibraryRequirement) -> String? {
+        guard let reason = requirement.reason else { return nil }
+        guard !inStore.contains(requirement.name) else { return reason }
+        return reason + " " + String(localized: "systemLibrary.copyItFrom")
+    }
+
+    /// The shared vocabulary, so "installed" here reads the same as in Settings
+    /// and in the setup wizard.
+    private func status(for requirement: SystemLibraryRequirement) -> NCStatus {
         if inBottle.contains(requirement.name) {
-            Label("Installed", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
+            .ready
         } else if inStore.contains(requirement.name) {
-            Label("Supplied", systemImage: "tray.full.fill")
-                .font(.caption)
-                .foregroundStyle(.blue)
+            .available
         } else {
-            Label("Not Supplied", systemImage: "xmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
+            .missing
+        }
+    }
+
+    /// Exhaustive on purpose: a `default:` arm here would silently label any
+    /// state added to ``NCStatus`` later as "Not supplied".
+    private func statusLabel(for requirement: SystemLibraryRequirement) -> LocalizedStringKey {
+        switch status(for: requirement) {
+        case .ready: "systemLibrary.status.installed"
+        case .available: "systemLibrary.status.supplied"
+        case .missing: "systemLibrary.status.notSupplied"
+        case .running, .failed, .unknown: "systemLibrary.status.notSupplied"
         }
     }
 
@@ -178,12 +194,12 @@ struct SystemLibraryConfigSection: View {
         if inBottle.contains(requirement.name) {
             EmptyView()
         } else if inStore.contains(requirement.name) {
-            Button("Install") {
+            Button("systemLibrary.install") {
                 install(requirement)
             }
             .controlSize(.small)
         } else {
-            Button("Supply\u{2026}") {
+            Button("systemLibrary.supply") {
                 importTarget = requirement
                 isImporting = true
             }

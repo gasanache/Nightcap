@@ -19,12 +19,28 @@
 import NightcapKit
 import SwiftUI
 
+/// One question and its answer: how large should Windows think the display is.
+///
+/// Was a hand-rolled sheet — a bold `Text` and a `Divider` standing in for a
+/// title bar, a `GroupBox` around the preview, a `Spacer` pushing two buttons
+/// down — at a height of 240 that belonged to no scale. The slider, the field
+/// and the live preview are unchanged; the frame around them is the shared one.
 struct DPIConfigSheetView: View {
     @Binding var dpiConfig: Int
     @Binding var isRetinaMode: Bool
     @Binding var presented: Bool
     @State var stagedChanges: Float
     @FocusState var textFocused: Bool
+
+    /// Points per inch at 100%. The preview renders a nominal 10pt run of text
+    /// at the staged DPI, halved on Retina where Wine draws at 2x.
+    private static let pointsPerInch: CGFloat = 72
+    private static let previewNominalSize: CGFloat = 10
+    /// The preview well is fixed rather than sized by its text: at 480 DPI the
+    /// sample outgrows the sheet, and a well that resizes as you drag the
+    /// slider makes the controls below it jump.
+    private static let previewHeight: CGFloat = 72
+    private static let dpiFieldWidth: CGFloat = 40
 
     init(dpiConfig: Binding<Int>, isRetinaMode: Binding<Bool>, presented: Binding<Bool>) {
         self._dpiConfig = dpiConfig
@@ -34,52 +50,58 @@ struct DPIConfigSheetView: View {
     }
 
     var body: some View {
-        VStack {
-            HStack {
-                Text("configDpi.title")
-                    .fontWeight(.bold)
-                Spacer()
+        NCSheet(
+            title: "configDpi.title",
+            width: ViewWidth.medium,
+            height: ViewHeight.compact
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.row) {
+                NCGroupLabel(title: "configDpi.preview", systemImage: "text.magnifyingglass")
+                previewWell
+                dpiControls
             }
-            Divider()
-            GroupBox(label: Label("configDpi.preview", systemImage: "text.magnifyingglass")) {
-                VStack {
-                    HStack {
-                        Text("configDpi.previewText")
-                            .padding(16)
-                            .font(.system(size:
-                                (10 * CGFloat(stagedChanges)) / 72 *
-                                    (isRetinaMode ? 0.5 : 1)
-                            ))
-                        Spacer()
-                    }
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, maxHeight: 80)
+        } footer: {
+            NCFooterSpacer()
+            Button("create.cancel") {
+                presented = false
             }
-            HStack {
-                Slider(value: $stagedChanges, in: 96 ... 480, step: 24, onEditingChanged: { _ in
-                    textFocused = false
-                })
-                TextField(String(), value: $stagedChanges, format: .number)
-                    .frame(width: 40)
-                    .focused($textFocused)
-                Text("configDpi.dpi")
+            .keyboardShortcut(.cancelAction)
+            Button("button.ok") {
+                dpiConfig = Int(stagedChanges)
+                presented = false
             }
-            Spacer()
-            HStack {
-                Spacer()
-                Button("create.cancel") {
-                    presented = false
-                }
-                .keyboardShortcut(.cancelAction)
-                Button("button.ok") {
-                    dpiConfig = Int(stagedChanges)
-                    presented = false
-                }
-                .keyboardShortcut(.defaultAction)
-            }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
         }
-        .padding()
-        .frame(width: ViewWidth.medium, height: 240)
+    }
+
+    // MARK: - Subviews
+
+    private var previewFontSize: CGFloat {
+        Self.previewNominalSize * CGFloat(stagedChanges) / Self.pointsPerInch
+            * (isRetinaMode ? 0.5 : 1)
+    }
+
+    private var previewWell: some View {
+        Text("configDpi.previewText")
+            .font(.system(size: previewFontSize))
+            .padding(Theme.Space.row)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: Self.previewHeight, alignment: .topLeading)
+            .background(.quaternary.opacity(0.25))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+            .clipped()
+    }
+
+    private var dpiControls: some View {
+        HStack(spacing: Theme.Space.snug) {
+            Slider(value: $stagedChanges, in: 96 ... 480, step: 24, onEditingChanged: { _ in
+                textFocused = false
+            })
+            TextField(String(), value: $stagedChanges, format: .number)
+                .frame(width: Self.dpiFieldWidth)
+                .focused($textFocused)
+            Text("configDpi.dpi")
+        }
     }
 }

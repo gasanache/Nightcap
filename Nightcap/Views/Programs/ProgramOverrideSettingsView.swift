@@ -37,6 +37,9 @@ struct ProgramOverrideSettingsView: View {
     @State private var activeDiagnosis: CrashDiagnosis?
     @State private var activeLogText: String = ""
     @State private var gameMatch: MatchResult?
+    @State private var installingDependency: DependencyDefinition?
+    @State private var audioWizardEngine: AudioTroubleshootingEngine?
+    @State private var audioMonitor = AudioDeviceMonitor()
     @State private var showGameConfigDetail: Bool = false
     @State private var recommendedDependencies: [DependencyDefinition] = []
 
@@ -59,10 +62,39 @@ struct ProgramOverrideSettingsView: View {
                 await loadGameMatch()
                 await loadRecommendedDependencies()
             }
+            .sheet(item: $installingDependency) { definition in
+                DependencyInstallSheet(definition: definition, bottle: bottle)
+            }
+            .sheet(
+                isPresented: Binding(
+                    get: { audioWizardEngine != nil },
+                    set: { if !$0 { audioWizardEngine = nil } }
+                )
+            ) {
+                if let engine = audioWizardEngine {
+                    AudioTroubleshootingWizardView(
+                        engine: engine,
+                        onDismiss: { audioWizardEngine = nil },
+                        onApplyFix: { actionId in
+                            await AudioFixActions.apply(actionId, to: bottle)
+                        },
+                        onOpenAdvanced: nil
+                    )
+                }
+            }
             .sheet(isPresented: $showGameConfigDetail) {
                 if let match = gameMatch {
-                    GameEntryDetailView(entry: match.entry, bottle: bottle)
-                        .frame(minWidth: 600, minHeight: 500)
+                    // Same trap as the banner's sheet: no dismiss control.
+                    NavigationStack {
+                        GameEntryDetailView(entry: match.entry, bottle: bottle)
+                            .toolbar {
+                                ToolbarItem(placement: .cancellationAction) {
+                                    Button("button.close") { showGameConfigDetail = false }
+                                        .keyboardShortcut(.cancelAction)
+                                }
+                            }
+                    }
+                    .frame(minWidth: 600, minHeight: 500)
                 }
             }
             .sheet(isPresented: $showDiagnosticsSheet) {
@@ -72,7 +104,8 @@ struct ProgramOverrideSettingsView: View {
                         logText: activeLogText,
                         programName: program.name,
                         bottleName: bottle.settings.name,
-                        timestamp: Date()
+                        timestamp: Date(),
+                        bottle: bottle
                     )
                     .frame(minWidth: 600, minHeight: 400)
                 }
@@ -94,6 +127,12 @@ struct ProgramOverrideSettingsView: View {
                 },
                 onAnalyzeLastRun: {
                     analyzeLastRun()
+                },
+                onRerunWithPreset: { preset in
+                    // Renders the "re-run with enhanced logging" control at
+                    // last: the closure it required was passed nowhere, so the
+                    // button silently never existed.
+                    program.settings.activeWineDebugPreset = preset
                 }
             )
 
@@ -139,14 +178,15 @@ struct ProgramOverrideSettingsView: View {
     // MARK: - Audio Troubleshooting Section
 
     private var audioTroubleshootingSection: some View {
-        Section("Audio") {
-            Button("Troubleshoot Audio\u{2026}") {
-                NotificationCenter.default.post(
-                    name: .openAudioTroubleshooting,
-                    object: nil
-                )
+        Section("config.title.audio") {
+            Button("config.audio.troubleshoot") {
+                // The old button posted a notification whose only observer
+                // lives on the Config page — a sibling navigation destination
+                // that is never mounted while this page is, so it always fired
+                // into silence.
+                audioWizardEngine = AudioFixActions.makeEngine(bottle: bottle, monitor: audioMonitor)
             }
-            .help("Open audio diagnostics and troubleshooting for this bottle")
+            .help("config.audio.troubleshoot.help")
         }
     }
 
@@ -164,10 +204,10 @@ struct ProgramOverrideSettingsView: View {
                             .font(.callout)
                         Spacer()
                         Button(String(localized: "dependency.install")) {
-                            NotificationCenter.default.post(
-                                name: .openDependenciesSection,
-                                object: nil
-                            )
+                            // The old button posted a notification with zero
+                            // observers anywhere in the app — the banner's one
+                            // call to action did nothing at all.
+                            installingDependency = definition
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
@@ -894,10 +934,3 @@ struct ProgramOverrideSettingsView: View {
 }
 
 // swiftlint:enable type_body_length
-
-extension Notification.Name {
-    /// Posted to navigate to the Dependencies section in ConfigView.
-    static let openDependenciesSection = Notification.Name(
-        "com.gasanache.Nightcap.openDependenciesSection"
-    )
-}

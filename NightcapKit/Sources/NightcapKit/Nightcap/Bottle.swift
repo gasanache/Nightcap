@@ -178,7 +178,19 @@ public final class Bottle: ObservableObject, Equatable, Hashable, Identifiable, 
             }
         }
 
-        // Get rid of duplicates and pins that reference removed files
+        // Get rid of duplicates and pins that reference removed files.
+        //
+        // Guarded on the drive being readable first, because this prune is
+        // destructive and permanent: the filtered list is what gets written
+        // back, so one moment where `drive_c` cannot be stat'd — the bottle on
+        // a volume still mounting, the container briefly unreachable — silently
+        // deletes every pin the user has. Observed exactly that: a bottle whose
+        // two pinned programs were both still on disk came back with none.
+        // When the drive cannot be read, nothing is known to be missing, so
+        // nothing is removed.
+        let driveC = bottleUrl.appending(path: "drive_c").path(percentEncoded: false)
+        guard FileManager.default.fileExists(atPath: driveC) else { return }
+
         var found: Set<URL> = []
         self.settings.pins = self.settings.pins.filter { pin in
             guard let url = pin.url else { return false }

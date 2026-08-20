@@ -441,15 +441,4 @@ public final class TroubleshootingFlowEngine: ObservableObject {
         session.lastUpdatedAt = Date()
         sessionStore.save(session)
     }
-
-    /// Records a path change with explanation for the UI.
-    ///
-    /// - Parameters:
-    ///   - oldPath: Description of the previous path.
-    ///   - newPath: Description of the new path.
-    ///   - reason: Why the path changed.
-    private func handleBranchChange(from oldPath: String, to newPath: String, reason: String) {
-        pathChanged = true
-        pathChangeReason = reason
-    }
 }

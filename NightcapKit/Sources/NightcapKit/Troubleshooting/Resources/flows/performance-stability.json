@@ -32,7 +32,7 @@
       "phase": "fix",
       "title": "Enable enhanced sync",
       "description": "Enabling enhanced sync reduces CPU overhead and improves frame pacing. Enable the DXVK HUD in Graphics settings to monitor frame times after applying this fix.",
-      "fixId": "enable-enhanced-sync",
+      "fixId": "enable-esync",
       "fixPreview": {
         "settingName": "Enhanced Sync",
         "currentValueKey": "currentValue",

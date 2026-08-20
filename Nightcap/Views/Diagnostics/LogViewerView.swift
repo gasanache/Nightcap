@@ -130,20 +130,6 @@ struct LogTextView: NSViewRepresentable {
 
     final class Coordinator {
         weak var textView: NSTextView?
-
-        func scrollToLine(_ lineIndex: Int) {
-            guard let textView, let storage = textView.textStorage else { return }
-            let text = storage.string as NSString
-            var currentLine = 0
-            var charIndex = 0
-            while currentLine < lineIndex, charIndex < text.length {
-                let range = text.lineRange(for: NSRange(location: charIndex, length: 0))
-                charIndex = NSMaxRange(range)
-                currentLine += 1
-            }
-            let targetRange = NSRange(location: charIndex, length: 0)
-            textView.scrollRangeToVisible(targetRange)
-        }
     }
 
     // MARK: - Content Application

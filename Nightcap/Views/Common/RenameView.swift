@@ -18,47 +18,59 @@
 
 import SwiftUI
 
+/// One question and its answer.
+///
+/// Was a `NavigationStack` wrapped around a grouped `Form` purely to get a title
+/// bar and two toolbar buttons — chrome no other sheet in the app wore, sized by
+/// `fixedSize` so its height was whatever the form happened to measure. The
+/// question, the field and the two buttons are the same; only the frame around
+/// them is now the shared one.
 struct RenameView: View {
-    let title: Text
+    /// A fixed caller-supplied label — "Rename bottle", "Rename pin" — so a key
+    /// rather than the `Text` this used to keep, which `NCSheet` cannot take.
+    let title: LocalizedStringKey
     var renameAction: (String) -> Void
 
     @State private var name: String = ""
     @Environment(\.dismiss) private var dismiss
 
     init(_ title: LocalizedStringKey, name: String, renameAction: @escaping (String) -> Void) {
-        self.title = Text(title)
+        self.title = title
         self._name = State(initialValue: name)
         self.renameAction = renameAction
     }
 
     var body: some View {
-        NavigationStack {
-            Form {
+        NCSheet(
+            title: title,
+            width: ViewWidth.small,
+            height: ViewHeight.compact
+        ) {
+            VStack(alignment: .leading, spacing: Theme.Space.snug) {
+                NCGroupLabel(title: "rename.name")
+                // The field's own label is hidden rather than dropped, so
+                // VoiceOver still announces "New name" while the drawn label
+                // above it is not said twice.
                 TextField("rename.name", text: $name)
-            }
-            .formStyle(.grouped)
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("create.cancel") {
-                        dismiss()
-                    }
-                    .keyboardShortcut(.cancelAction)
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    Button("rename.rename") {
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    .onSubmit {
                         submit()
                     }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!isNameValid)
-                }
             }
-            .onSubmit {
+        } footer: {
+            NCFooterSpacer()
+            Button("create.cancel") {
+                dismiss()
+            }
+            .keyboardShortcut(.cancelAction)
+            Button("rename.rename") {
                 submit()
             }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+            .disabled(!isNameValid)
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(minWidth: ViewWidth.small)
     }
 
     var isNameValid: Bool {
@@ -66,6 +78,9 @@ struct RenameView: View {
     }
 
     func submit() {
+        // Return in the field used to bypass the disabled button: a cleared
+        // name renamed the bottle (or pin) to the empty string.
+        guard isNameValid else { return }
         renameAction(name)
         dismiss()
     }

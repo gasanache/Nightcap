@@ -35,9 +35,14 @@ struct TroubleshootingHistoryView: View {
     var body: some View {
         Group {
             if filteredEntries.isEmpty {
-                ContentUnavailableView(
-                    String(localized: "troubleshooting.history.empty"),
-                    systemImage: "clock.arrow.circlepath"
+                // `ContentUnavailableView` sizes to its own content, so inside a
+                // Form row it centred itself on the row's content column rather
+                // than the card, leaving the glyph and title visibly left of
+                // centre. ``NCEmptyState`` fills the width it is given, which is
+                // also what the rest of the app's empty screens use.
+                NCEmptyState(
+                    systemImage: "clock.arrow.circlepath",
+                    title: "troubleshooting.history.empty"
                 )
             } else {
                 ForEach(filteredEntries) { entry in

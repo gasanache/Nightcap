@@ -88,15 +88,15 @@ struct AudioConfigSection: View {
         .onAppear {
             startDeviceListening()
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openAudioTroubleshooting)) { _ in
-            openTroubleshootingWizard()
-        }
         .sheet(isPresented: $showTroubleshootingWizard) {
             if let engine = troubleshootingEngine {
                 AudioTroubleshootingWizardView(
                     engine: engine,
                     onDismiss: {
                         showTroubleshootingWizard = false
+                    },
+                    onApplyFix: { actionId in
+                        await AudioFixActions.apply(actionId, to: bottle)
                     },
                     // Every audio option is already on screen, so there is
                     // nothing left for this to reveal.
@@ -110,13 +110,6 @@ struct AudioConfigSection: View {
 // MARK: - Computed Properties
 
 extension AudioConfigSection {
-    /// True if any advanced-only audio settings differ from defaults.
-    private var hasAdvancedAudioOverrides: Bool {
-        bottle.settings.audioDriver != .auto
-            || bottle.settings.audioLatencyPreset != .defaultPreset
-            || bottle.settings.outputDeviceMode != .followSystem
-    }
-
     /// Aggregated findings from the most recent probe results.
     private var currentFindings: [AudioFinding] {
         probeResults.flatMap(\.findings)
@@ -125,19 +118,7 @@ extension AudioConfigSection {
 
 // MARK: - Advanced Overrides Badge
 
-extension AudioConfigSection {
-    private var advancedOverridesBadge: some View {
-        HStack {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.secondary)
-            Text("Advanced audio settings active")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-                .font(.caption)
-        }
-    }
-}
+extension AudioConfigSection {}
 
 // MARK: - Advanced Device Views
 
@@ -162,21 +143,7 @@ extension AudioConfigSection {
 extension AudioConfigSection {
     private func handleApplyFix(_ actionId: String) {
         Task { @MainActor in
-            switch actionId {
-            case "check-audio-driver", "set-coreaudio-driver":
-                bottle.settings.audioDriver = .coreaudio
-                try? await Wine.setAudioDriver(bottle: bottle, driver: .coreaudio)
-            case "set-stable-latency":
-                bottle.settings.audioLatencyPreset = .stable
-                try? await Wine.setDirectSoundBuffer(
-                    bottle: bottle,
-                    helBuflen: AudioLatencyPreset.stable.helBuflenValue
-                )
-            case "reset-audio-state":
-                try? await Wine.resetAudioState(bottle: bottle)
-            default:
-                break
-            }
+            await AudioFixActions.apply(actionId, to: bottle)
         }
     }
 }

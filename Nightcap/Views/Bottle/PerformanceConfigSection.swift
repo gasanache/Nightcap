@@ -23,69 +23,71 @@ struct PerformanceConfigSection: View {
     @ObservedObject var bottle: Bottle
 
     var body: some View {
-        Section("config.title.performance") {
+        NCSection(title: "config.title.performance") {
             Picker("config.performancePreset", selection: $bottle.settings.performancePreset) {
                 ForEach(PerformancePreset.allCases, id: \.self) { preset in
                     Text(preset.description()).tag(preset)
                 }
             }
-            // Show description of current preset
-            if bottle.settings.performancePreset != .balanced {
-                HStack {
-                    Image(systemName: presetIcon(for: bottle.settings.performancePreset))
-                        .foregroundColor(.secondary)
-                    Text(presetDescription(for: bottle.settings.performancePreset))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            Toggle(isOn: $bottle.settings.shaderCacheEnabled) {
-                VStack(alignment: .leading) {
-                    Text("config.shaderCache")
-                    Text("config.shaderCache.info")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            Toggle(isOn: $bottle.settings.forceD3D11) {
-                VStack(alignment: .leading) {
-                    Text("config.forceD3D11")
-                    Text("config.forceD3D11.info")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            Toggle(isOn: $bottle.settings.disableAppNap) {
-                VStack(alignment: .leading) {
-                    Text("config.disableAppNap")
-                    Text("config.disableAppNap.info")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-            // Install VC++ Runtime button for Unity games
-            if !bottle.settings.vcRedistInstalled {
-                Button {
+
+            // What the selected preset actually does. This used to be hidden
+            // for `.balanced`, so the default — the preset most bottles are on
+            // — was the one that explained nothing about itself.
+            presetExplanation
+
+            // The Shader Cache toggle stood here. It set
+            // DXVK_SHADER_COMPILE_THREADS and __GL_SHADER_DISK_CACHE — the
+            // first is not how the shipped DXVK is configured and the second
+            // is an NVIDIA driver variable — so the switch did nothing on any
+            // bottle. Removed with its environment writes.
+
+            // Force D3D11 lived here as well as in Graphics, bound to the same
+            // setting. It is a graphics-backend choice, so Graphics keeps it.
+            NCToggleRow(
+                title: "config.disableAppNap",
+                isOn: $bottle.settings.disableAppNap,
+                caption: "config.disableAppNap.info"
+            )
+
+            vcRedistRow
+        }
+    }
+
+    // MARK: - Preset Explanation
+
+    /// An icon-and-caption pair drawn by hand, with the preset's own glyph
+    /// carrying the subject and the tint carrying nothing. `.unknown` keeps it
+    /// quiet: describing the current choice is not a warning.
+    private var presetExplanation: some View {
+        NCNotice(
+            status: .unknown,
+            message: presetDescription(for: bottle.settings.performancePreset),
+            symbol: presetIcon(for: bottle.settings.performancePreset)
+        )
+    }
+
+    // MARK: - VC++ Runtime
+
+    /// Either the fact that the runtime is present, or the notice that it is
+    /// missing with the install alongside it. The missing case was a whole
+    /// button dressed as a title-and-caption row, so nothing on screen said
+    /// pressing it would run winetricks.
+    @ViewBuilder
+    private var vcRedistRow: some View {
+        if bottle.settings.vcRedistInstalled {
+            NCStatusBadge(status: .ready, label: "config.vcRedistInstalled")
+        } else {
+            NCNotice(
+                status: .missing,
+                message: String(localized: "config.installVcRedist.info"),
+                title: "config.installVcRedist",
+                symbol: "wrench.and.screwdriver"
+            ) {
+                Button("config.performance.vcRedist.install") {
                     Task {
                         await Winetricks.runCommand(command: "vcrun2019", bottle: bottle)
                         bottle.settings.vcRedistInstalled = true
                     }
-                } label: {
-                    HStack {
-                        Image(systemName: "wrench.and.screwdriver")
-                        VStack(alignment: .leading) {
-                            Text("config.installVcRedist")
-                            Text("config.installVcRedist.info")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-            } else {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                    Text("config.vcRedistInstalled")
                 }
             }
         }

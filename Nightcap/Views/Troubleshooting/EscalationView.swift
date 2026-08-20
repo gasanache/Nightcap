@@ -134,22 +134,32 @@ extension EscalationView {
 // MARK: - Enhanced Diagnostics
 
 extension EscalationView {
+    @ViewBuilder
     private var enhancedDiagnosticsOption: some View {
-        escalationButton(
-            title: "Run Enhanced Diagnostics",
-            description: "Re-run with verbose Wine logging enabled (WINEDEBUG). "
-                + "This creates detailed logs that help diagnose the issue.",
-            sfSymbol: "text.magnifyingglass",
-            action: runEnhancedDiagnostics
-        )
+        // Hidden when there is no program to configure: the old button showed
+        // regardless and merely wrote a session record — WINEDEBUG was never
+        // set and nothing relaunched, so its promise was false.
+        if program != nil {
+            escalationButton(
+                title: String(localized: "troubleshooting.escalation.verbose"),
+                description: String(localized: "troubleshooting.escalation.verbose.desc"),
+                sfSymbol: "text.magnifyingglass",
+                action: runEnhancedDiagnostics
+            )
+        }
     }
 
     private func runEnhancedDiagnostics() {
+        // The one real WINEDEBUG mechanism: the per-program preset the
+        // environment builder reads at the next launch.
+        program?.settings.activeWineDebugPreset = .verbose
         engine.applyFix(
             fixId: "run-enhanced-diagnostics",
             beforeValue: "default",
             afterValue: "verbose"
         )
+        engine.confirmFixApplied(fixId: "run-enhanced-diagnostics")
+        exportedPath = String(localized: "troubleshooting.escalation.verbose.done")
     }
 }
 
@@ -159,10 +169,9 @@ extension EscalationView {
     private var exportDiagnosticsOption: some View {
         VStack(alignment: .leading, spacing: 4) {
             escalationButton(
-                title: "Export Diagnostics",
-                description: "Create a ZIP bundle with findings, fix history, "
-                    + "and relevant logs for sharing.",
-                sfSymbol: "square.and.arrow.up",
+                title: String(localized: "troubleshooting.escalation.copySummary"),
+                description: String(localized: "troubleshooting.escalation.copySummary.desc"),
+                sfSymbol: "doc.on.clipboard",
                 action: exportDiagnostics
             )
             if let exportedPath {
@@ -217,7 +226,7 @@ extension EscalationView {
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
-        exportedPath = "Clipboard (ready to paste)"
+        exportedPath = String(localized: "troubleshooting.escalation.copied")
     }
 }
 

@@ -19,17 +19,22 @@
 import NightcapKit
 
 extension LaunchResult {
-    /// Converts launch result to appropriate toast notification data.
-    /// Toast style and auto-dismiss behavior are derived from the testable properties
-    /// `notificationStyle` and `shouldAutoDismiss` defined in NightcapKit.
-    var toastData: ToastData {
-        let style: ToastStyle = switch notificationStyle {
-        case .success: .success
-        case .info: .info
-        case .error: .error
+    /// How this launch should be announced.
+    ///
+    /// The status comes from ``NCStatus`` rather than a toast-only vocabulary:
+    /// a launch that failed should look like everything else in the app that
+    /// failed. `notificationStyle` and `shouldAutoDismiss` stay in NightcapKit,
+    /// where they are tested.
+    var toastStatus: NCStatus {
+        switch notificationStyle {
+        case .success: .ready
+        case .info: .available
+        case .error: .failed
         }
+    }
 
-        let message = switch self {
+    var toastMessage: String {
+        switch self {
         case let .launchedSuccessfully(name):
             String(localized: "status.launched \(name)")
         case let .launchedInTerminal(name):
@@ -37,7 +42,11 @@ extension LaunchResult {
         case let .launchFailed(_, errorDescription):
             String(localized: "status.launchFailed \(errorDescription)")
         }
+    }
 
-        return ToastData(message: message, style: style, autoDismiss: shouldAutoDismiss)
+    /// Announces this result on the app's single toast centre.
+    @MainActor
+    func announce(on centre: NCToastCenter) {
+        centre.show(toastMessage, status: toastStatus, persistent: !shouldAutoDismiss)
     }
 }

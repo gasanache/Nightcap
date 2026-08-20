@@ -30,42 +30,50 @@ struct LauncherConfigSection: View {
     @ObservedObject var bottle: Bottle
 
     var body: some View {
-        // Always visible: nothing here is advanced enough to hide behind an arrow.
-        VStack(alignment: .leading, spacing: 10) {
-            launcherSectionLabel
-            VStack(alignment: .leading, spacing: 12) {
-                // Enable launcher compatibility mode
-                Toggle("Launcher Compatibility Mode", isOn: $bottle.settings.launcherCompatibilityMode)
-                    .help("""
-                    Enables automatic fixes for Steam, Rockstar, EA App, Epic Games, \
-                    and other game launchers (frankea/Nightcap#41)
-                    """)
-
-                if bottle.settings.launcherCompatibilityMode {
-                    launcherCompatibilityControls
-                }
+        // A real Section, for the same reason as Input — and these two sat
+        // next to each other, so the page showed two fake headers in a row
+        // between genuine ones.
+        NCSection(
+            title: "config.title.launcher",
+            systemImage: "gamecontroller.fill",
+            accessory: { headerStatus },
+            content: {
+                sectionContent
             }
-            .padding(.vertical, 8)
+        )
+    }
+
+    private var sectionContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.row) {
+            // The explanation was a tooltip, so it reached only people who
+            // hovered. It is the caption now.
+            NCToggleRow(
+                title: "launcher.compat.title",
+                isOn: $bottle.settings.launcherCompatibilityMode,
+                caption: "launcher.compat.caption"
+            )
+
+            if bottle.settings.launcherCompatibilityMode {
+                launcherCompatibilityControls
+            }
         }
     }
 
-    // MARK: - Section Label
+    // MARK: - Header status
 
-    private var launcherSectionLabel: some View {
-        HStack {
-            Label("Launcher Compatibility", systemImage: "gamecontroller.fill")
-                .font(.headline)
-
-            if bottle.settings.launcherCompatibilityMode {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                    .font(.caption)
-            }
-
+    /// What the old fake header said on its right-hand side: whether the mode
+    /// is on, and which launcher was detected. Both are worth keeping; only the
+    /// heading that outranked its neighbours was the problem.
+    @ViewBuilder
+    private var headerStatus: some View {
+        HStack(spacing: Theme.Space.snug) {
             if let launcher = bottle.settings.detectedLauncher {
-                Text("(\(launcher.rawValue))")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Text(launcher.rawValue)
+                    .font(Theme.Typography.machine)
+                    .foregroundStyle(.secondary)
+            }
+            if bottle.settings.launcherCompatibilityMode {
+                NCStatusBadge(status: .ready, label: "launcher.compat.on")
             }
         }
     }
@@ -94,9 +102,6 @@ extension LauncherConfigSection {
 
         Divider()
 
-        // Network configuration
-        networkControls
-
         // Auto-enable DXVK
         Toggle("Auto-Enable DXVK for Launchers", isOn: $bottle.settings.autoEnableDXVK)
             .help("""
@@ -111,21 +116,10 @@ extension LauncherConfigSection {
 
         Divider()
 
-        // Link to Diagnostics section (replaces inline diagnostics button)
-        HStack {
-            Spacer()
-            Button {
-                NotificationCenter.default.post(
-                    name: .openDiagnosticsSection,
-                    object: nil
-                )
-            } label: {
-                Label("View Diagnostics", systemImage: "stethoscope")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            Spacer()
-        }
+        // A "View Diagnostics" button stood here. It posted
+        // `.openDiagnosticsSection`, which nothing in the app observed, so
+        // pressing it did nothing at all. The Diagnostics section is on this
+        // same page, a short scroll away.
 
         // Configuration warnings
         configurationWarnings
@@ -245,30 +239,6 @@ extension LauncherConfigSection {
         }
     }
 
-    private var networkControls: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Network Timeout:")
-                Spacer()
-                Text("\(bottle.settings.networkTimeout / 1_000)s")
-                    .foregroundColor(.secondary)
-            }
-
-            Slider(
-                value: Binding(
-                    get: { Double(bottle.settings.networkTimeout) },
-                    set: { bottle.settings.networkTimeout = Int($0) }
-                ),
-                in: 30_000 ... 180_000,
-                step: 15_000
-            )
-
-            Text("Fixes Steam download stalls and connection timeouts")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
     @ViewBuilder
     private var configurationWarnings: some View {
         if let launcher = bottle.settings.detectedLauncher {
@@ -332,10 +302,13 @@ private struct ActiveEnvironmentOverrides: View {
         let sortedCategories = grouped.keys.sorted { $0.rawValue < $1.rawValue }
 
         VStack(alignment: .leading, spacing: 8) {
-            Label("\(launcher.displayName) Fixes", systemImage: "gamecontroller")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
+            Label(
+                String(format: String(localized: "launcher.fixes %@"), launcher.displayName),
+                systemImage: "gamecontroller"
+            )
+            .font(.caption)
+            .fontWeight(.semibold)
+            .foregroundColor(.primary)
 
             ForEach(sortedCategories, id: \.self) { category in
                 if let fixes = grouped[category] {
@@ -355,7 +328,7 @@ private struct ActiveEnvironmentOverrides: View {
 
         if !activeFixes.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                Label("Platform Fixes", systemImage: "desktopcomputer")
+                Label("launcher.fixes.platform", systemImage: "desktopcomputer")
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
@@ -454,15 +427,6 @@ private struct ActiveEnvironmentOverrides: View {
     }
 }
 
-// MARK: - Notification Names
-
-extension Notification.Name {
-    /// Posted to navigate to the Diagnostics section in ConfigView.
-    static let openDiagnosticsSection = Notification.Name(
-        "com.gasanache.Nightcap.openDiagnosticsSection"
-    )
-}
-
 // MARK: - Diagnostics Report View (Shared)
 
 /// View for displaying diagnostic report in a sheet (shared across the Nightcap app target).
@@ -516,7 +480,10 @@ struct DiagnosticsReportView: View {
             }
             .padding()
         }
-        .frame(width: 700, height: 600)
+        // 700x600 overhung the host window — the same clipped-footer bug the
+        // install and winetricks sheets shipped with — and the clipped edge
+        // held Copy and Export, the two buttons the report exists for.
+        .frame(width: ViewWidth.large, height: ViewHeight.large)
     }
 
     private func exportReport() {

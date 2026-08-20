@@ -37,6 +37,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // The Settings toggle declares `killOnTerminate` with a default of
+        // true, but `UserDefaults.bool(forKey:)` returns false for a key never
+        // written — so the toggle showed ON while the terminate path and the
+        // orphan sweep behaved as OFF until the user flipped it once.
+        UserDefaults.standard.register(defaults: ["killOnTerminate": true])
+
+        // Before any window is on screen, so the first frame is already in the
+        // chosen appearance rather than flashing the system one first.
+        AppAppearance.applyStored()
+
         if !hasShownMoveToApplicationsAlert, !AppDelegate.insideAppsFolder {
             DispatchQueue.main.asyncAfter(deadline: .now()) {
                 NSApp.activate(ignoringOtherApps: true)
@@ -59,30 +69,44 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
+    /// Kill-on-quit has to finish before the process exits. The old
+    /// implementation ran the kills from `applicationWillTerminate` via
+    /// `Wine.killBottle`, which wraps the work in a `Task` — the delegate
+    /// returned, AppKit exited, and the task never got a turn, so the setting
+    /// silently did nothing (which is why the launch-time orphan sweep exists).
+    /// `.terminateLater` holds termination open until the kills complete, with
+    /// a hard cap so a wedged wineserver cannot hang quit forever.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let globalKill = UserDefaults.standard.bool(forKey: "killOnTerminate")
-
-        // Per-bottle kill-on-quit with policy overrides
-        for bottle in BottleVM.shared.bottles {
-            let bottlePolicy = bottle.settings.killOnQuit
-            let shouldKill: Bool = switch bottlePolicy {
-            case .inherit:
-                globalKill
-            case .alwaysKill:
-                true
-            case .neverKill:
-                false
-            }
-
-            if shouldKill {
-                Wine.killBottle(bottle: bottle)
-                ProcessRegistry.shared.clearRegistry(for: bottle.url)
-                logger.info(
-                    "Killing bottle '\(bottle.settings.name)' on quit (policy: \(String(describing: bottlePolicy)))"
-                )
+        let toKill = BottleVM.shared.bottles.filter { bottle in
+            switch bottle.settings.killOnQuit {
+            case .inherit: globalKill
+            case .alwaysKill: true
+            case .neverKill: false
             }
         }
+        guard !toKill.isEmpty else { return .terminateNow }
 
+        Task { @MainActor in
+            // Sequential with a hard deadline: killBottleAndWait itself polls
+            // for at most ~2 s per bottle, and the deadline means a wedged
+            // wineserver cannot hold quit hostage.
+            let deadline = Date().addingTimeInterval(10)
+            for bottle in toKill {
+                guard Date() < deadline else {
+                    logger.warning("Quit deadline reached; remaining bottles left to the orphan sweep")
+                    break
+                }
+                logger.info("Killing bottle '\(bottle.settings.name)' on quit")
+                await Wine.killBottleAndWait(bottle: bottle)
+                ProcessRegistry.shared.clearRegistry(for: bottle.url)
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
         // Synchronous best-effort temp file cleanup (cannot await in applicationWillTerminate)
         let trackedFiles = TempFileTracker.shared.getAllTrackedFiles()
         for (fileURL, _) in trackedFiles {
@@ -179,9 +203,4 @@ extension Notification.Name {
     /// Posted when orphaned Wine processes are cleaned up at launch.
     /// Contains userInfo key "count" (Int) with the number of processes killed.
     static let zombieProcessesCleaned = Notification.Name("zombieProcessesCleaned")
-
-    /// Posted from program settings to navigate to the Audio troubleshooting panel.
-    static let openAudioTroubleshooting = Notification.Name(
-        "com.gasanache.Nightcap.openAudioTroubleshooting"
-    )
 }

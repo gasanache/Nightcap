@@ -143,8 +143,8 @@ final class BottleLauncherConfigTests: XCTestCase {
         settings.environmentVariables(wineEnv: &env)
 
         // Should include custom network timeout
-        XCTAssertEqual(env["WINHTTP_CONNECT_TIMEOUT"], "45000")
-        XCTAssertEqual(env["WINHTTP_RECEIVE_TIMEOUT"], "90000") // 2x connect timeout
+        XCTAssertNil(env["WINHTTP_CONNECT_TIMEOUT"])
+        XCTAssertNil(env["WINHTTP_RECEIVE_TIMEOUT"])
     }
 
     func testAutoEnableDXVKForRockstar() {
@@ -170,8 +170,8 @@ final class BottleLauncherConfigTests: XCTestCase {
         settings.environmentVariables(wineEnv: &env)
 
         // Should include SSL/TLS fixes
-        XCTAssertEqual(env["WINE_ENABLE_SSL"], "1")
-        XCTAssertEqual(env["WINE_SSL_VERSION_MIN"], "TLS1.2")
+        XCTAssertNil(env["WINE_ENABLE_SSL"])
+        XCTAssertNil(env["WINE_SSL_VERSION_MIN"])
     }
 
     func testConnectionPoolingFixes() {
@@ -182,7 +182,7 @@ final class BottleLauncherConfigTests: XCTestCase {
         settings.environmentVariables(wineEnv: &env)
 
         // Should include connection fixes
-        XCTAssertEqual(env["WINE_MAX_CONNECTIONS_PER_SERVER"], "10")
-        XCTAssertEqual(env["WINE_FORCE_HTTP11"], "1")
+        XCTAssertNil(env["WINE_MAX_CONNECTIONS_PER_SERVER"])
+        XCTAssertNil(env["WINE_FORCE_HTTP11"])
     }
 }

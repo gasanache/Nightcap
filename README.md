@@ -1,5 +1,7 @@
 <div align="center">
 
+<img width="128" alt="Nightcap" src="./images/icon.png">
+
 # Nightcap 🥃
 
 *Wine but a bit stronger*
@@ -19,13 +21,29 @@ which was archived in April 2025. Not affiliated with either project.
 Changes made in this fork, 2026: rebranded to Nightcap; Sparkle auto-updates removed; all analytics and
 data collection removed; presets in place of the game configuration browser; the Wine runtime self-hosted
 on this repository's releases; Swift 6 across every target; bottle configuration flattened so nothing is
-hidden; Windows 11 the default for new bottles.
+hidden; Windows 11 the default for new bottles; the interface rebuilt on one set of components so a
+status, a row or a card reads the same wherever it appears.
 
-<img width="650" alt="Bottle configuration" src="./images/config-screenshot.png">
+<img width="760" alt="A bottle in Nightcap" src="./images/home.png">
 
 ## Requirements
 
 Apple Silicon · macOS 15 or later · Windows 11 bottles
+
+## Programs
+
+Everything the bottle has, with its architecture, a settings sheet of its own, and a pin for the ones you
+actually launch. Pinned programs sit at the top of the bottle.
+
+<img width="760" alt="Installed programs" src="./images/programs.png">
+
+## Configuration
+
+One page, nothing folded away. Every setting says what it does in prose rather than in a tooltip you have
+to hover to find, and anything the bottle has to be asked for — the Windows version, Retina mode — reports
+what it actually came back with.
+
+<img width="760" alt="Bottle configuration" src="./images/configuration.png">
 
 ## Graphics
 
@@ -38,10 +56,24 @@ Pick a backend per bottle. Only one of them accepts Direct3D 9.
 | **DXVK** | D3D10/11 → Vulkan | Compatibility fallback; Chromium and Electron UIs |
 | **WineD3D** | D3D9 → OpenGL | Older games. The only D3D9 path |
 
+A backend the installed engine cannot provide is shown greyed with the reason, rather than being offered
+and then silently falling back at launch.
+
+<img width="760" alt="Graphics backend selection" src="./images/graphics.png">
+
 ## Presets
 
 Named configurations you apply to a bottle. Applying one restarts the bottle so it takes effect
 immediately. **Diagnostics On** adds a live frame-rate readout under Running Processes.
+
+<img width="760" alt="Presets" src="./images/presets.png">
+
+## Settings
+
+Appearance follows the system by default, and can be pinned to light or dark for Nightcap alone without
+touching the rest of the Mac.
+
+<img width="620" alt="Settings" src="./images/settings.png">
 
 ## Building
 

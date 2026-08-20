@@ -92,8 +92,6 @@ public enum GPTKImporter {
     /// path. Kept in the store but never deployed: a stock runtime ships no
     /// `nvapi64` at all, so placing Apple's makes every process that probes for
     /// an NVIDIA GPU load D3DMetal — Chromium does exactly that, which takes
-    /// Steam's helper process down with it. Opt-in territory, not a default.
-    static let nvidiaBridgeDLLNames = ["nvapi64.dll", "nvngx-on-metalfx.dll"]
 
     /// Enough bytes to hold the winebuild marker at offset 0x40.
     static let builtinMarkerMinimumLength = 0x50

@@ -131,6 +131,10 @@ struct BottleCreationView: View {
     )
 
     func submit() {
+        // Return used to skip the name check entirely and create a bottle
+        // named "".
+        guard nameValid else { return }
+
         // The default location never passes through the panel, so it is probed
         // here or not at all.
         guard let issue = validate(newBottleURL) else {

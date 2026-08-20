@@ -294,17 +294,6 @@ extension Wine {
             }
         }
 
-        // Shader cache override
-        if let shaderCache = overrides.shaderCacheEnabled {
-            if !shaderCache {
-                builder.set("DXVK_SHADER_COMPILE_THREADS", "1", layer: .programUser)
-                builder.set("__GL_SHADER_DISK_CACHE", "0", layer: .programUser)
-            } else {
-                builder.remove("DXVK_SHADER_COMPILE_THREADS", layer: .programUser)
-                builder.remove("__GL_SHADER_DISK_CACHE", layer: .programUser)
-            }
-        }
-
         // Input override: controller compatibility SDL hints at program level
         if let controllerCompat = overrides.controllerCompatibilityMode {
             // When compat mode is overridden, control whether SDL hints are applied

@@ -20,49 +20,36 @@ import NightcapKit
 import SwiftUI
 
 struct PinView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     @ObservedObject var bottle: Bottle
     @ObservedObject var program: Program
     @State var pin: PinnedProgram
     @Binding var path: NavigationPath
-    @Binding var toast: ToastData?
 
-    @State private var image: Image?
+    /// The icon arrives from ``IconCache`` as an `NSImage`, and ``NCTile``
+    /// takes it in that form — the intermediate `Image` only existed because
+    /// this view drew the tile itself.
+    @State private var icon: NSImage?
     @State private var showRenameSheet = false
     @State private var name: String = ""
     @State private var opening: Bool = false
 
     var body: some View {
-        VStack {
-            Group {
-                if let image {
-                    image
-                        .resizable()
-                } else {
-                    Image(systemName: "app.dashed")
-                        .resizable()
-                }
-            }
-            .frame(width: 45, height: 45)
-            .scaleEffect(opening ? 2 : 1)
-            .opacity(opening ? 0 : 1)
-            Spacer()
-            Text(name)
-                .multilineTextAlignment(.center)
-                .lineLimit(2, reservesSpace: true)
-        }
-        .frame(width: 90, height: 90)
-        .padding(10)
-        .overlay {
-            HStack {
-                Spacer()
-                Image(systemName: "play.fill")
-                    .resizable()
-                    .foregroundColor(.green)
-                    .frame(width: 16, height: 16)
-            }
-            .frame(width: 45, height: 45)
-            .padding(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
-        }
+        // The tile geometry — the square, the icon derived from it, the button
+        // that makes launching reachable by keyboard — is ``NCTile``. This view
+        // had its own copy of those numbers, and ``PinAddView`` had a third,
+        // which is how the two tiles drifted apart in the first place.
+        NCTile(
+            title: name,
+            systemImage: "app.dashed",
+            nsImage: icon,
+            isOpening: opening,
+            accessibilityID: "pin.launch",
+            requiresDoubleClick: true,
+            action: runProgram
+        )
+        .help("pin.launch.help")
         .contextMenu {
             ProgramMenuView(program: program, path: $path)
 
@@ -75,9 +62,6 @@ struct PinView: View {
             }
             .labelStyle(.titleAndIcon)
         }
-        .onTapGesture(count: 2) {
-            runProgram()
-        }
         .sheet(isPresented: $showRenameSheet) {
             RenameView("rename.pin.title", name: name) { newName in
                 name = newName
@@ -85,8 +69,7 @@ struct PinView: View {
         }
         .task {
             name = pin.name
-            let icon = await IconCache.shared.iconOrFallback(for: program.url, peFile: program.peFile)
-            self.image = Image(nsImage: icon)
+            icon = await IconCache.shared.iconOrFallback(for: program.url, peFile: program.peFile)
         }
         .onChange(of: name) {
             if let index = bottle.settings.pins.firstIndex(where: {
@@ -112,7 +95,7 @@ struct PinView: View {
         Task {
             let result = await program.launchWithUserMode(useTerminal: useTerminal)
             withAnimation {
-                toast = result.toastData
+                result.announce(on: toastCentre)
             }
         }
     }

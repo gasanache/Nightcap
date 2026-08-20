@@ -32,6 +32,8 @@ enum WinetricksInstallProgress {
     case completed(exitCode: Int32)
     /// The installation failed with an error message.
     case failed(String)
+    /// The installation ran past its time limit and was terminated.
+    case timedOut(seconds: Int)
 }
 
 // MARK: - Headless Verb Installation
@@ -55,7 +57,7 @@ extension Winetricks {
     static func installVerb(
         _ verb: String,
         for bottle: Bottle,
-        timeout: TimeInterval = 600
+        timeout: TimeInterval = 1_800
     ) -> AsyncStream<WinetricksInstallProgress> {
         AsyncStream { continuation in
             Task {
@@ -174,13 +176,19 @@ extension Winetricks {
             return
         }
 
-        await awaitProcessCompletion(process, verb: verb, timeout: timeout)
+        let didTimeOut = await awaitProcessCompletion(process, verb: verb, timeout: timeout)
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
 
         let exitCode = process.terminationStatus
         logger.info("winetricks install '\(verb)' exited with status \(exitCode)")
-        continuation.yield(.completed(exitCode: exitCode))
+        if didTimeOut {
+            // A SIGTERM exit used to surface as a bare "Completed (exit code:
+            // 15)", indistinguishable from the verb's own failure.
+            continuation.yield(.timedOut(seconds: Int(timeout)))
+        } else {
+            continuation.yield(.completed(exitCode: exitCode))
+        }
 
         // Refresh the verb cache after installation
         _ = await Winetricks.loadInstalledVerbs(for: bottle)
@@ -188,19 +196,40 @@ extension Winetricks {
     }
 
     /// Waits for the process to exit or times out.
+    /// - Returns: `true` when the process was terminated by the timeout.
     private static func awaitProcessCompletion(
         _ process: Process,
         verb: String,
         timeout: TimeInterval
-    ) async {
+    ) async -> Bool {
+        let timedOut = TimeoutFlag()
         let timeoutTask = Task {
             try await Task.sleep(for: .seconds(timeout))
             if process.isRunning {
                 logger.warning("winetricks install '\(verb)' timed out after \(Int(timeout)) seconds")
+                timedOut.set()
                 process.terminate()
             }
         }
         process.waitUntilExit()
         timeoutTask.cancel()
+        return timedOut.isSet
+    }
+
+    /// A thread-safe flag the timeout task sets and the waiter reads.
+    private final class TimeoutFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func set() {
+            lock.lock()
+            value = true
+            lock.unlock()
+        }
+
+        var isSet: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
     }
 }

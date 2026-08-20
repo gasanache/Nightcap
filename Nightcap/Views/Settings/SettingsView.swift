@@ -19,16 +19,66 @@
 import NightcapKit
 import SwiftUI
 
+/// Three tabs, because one column was the wrong shape.
+///
+/// This window is fixed-width and sized to its content, so its height was the
+/// sum of every section on it — and the engine section alone ends in a
+/// paragraph and a four-line checklist, which pushed the window past the point
+/// where anything could be read at a glance. Each tab is now a bounded form
+/// that scrolls, so a section growing no longer grows the window.
+///
+/// The split follows what the settings are about rather than what they were:
+/// Wine holds the engine and the update check that keeps it current, and
+/// Graphics holds the two halves of Direct3D 12 on Metal — the payload import
+/// and the checklist saying which half is still missing — which were previously
+/// on opposite ends of the window.
 struct SettingsView: View {
     @AppStorage("killOnTerminate") var killOnTerminate = true
     @AppStorage("showMenuBarExtra") var showMenuBarExtra = false
     @AppStorage("checkNightcapWineUpdates") var checkNightcapWineUpdates = true
     @AppStorage("defaultBottleLocation") var defaultBottleLocation = BottleData.defaultBottleDir
     @AppStorage("preferredTerminal") var preferredTerminal = "terminal"
+    @AppStorage(AppAppearance.storageKey) var appearance: AppAppearance = .system
 
     var body: some View {
+        TabView {
+            general
+                .tabItem {
+                    Label("settings.general", systemImage: "gearshape")
+                }
+            wine
+                .tabItem {
+                    Label("settings.tab.wine", systemImage: "wineglass")
+                }
+            graphics
+                .tabItem {
+                    Label("settings.tab.graphics", systemImage: "display")
+                }
+        }
+        // One size for all three tabs: a Settings window that resizes itself as
+        // you move between tabs is the other way this screen used to misbehave.
+        .frame(width: ViewWidth.large, height: ViewHeight.medium)
+    }
+
+    /// The settings that are about Nightcap itself rather than about Wine.
+    private var general: some View {
         Form {
-            Section("settings.general") {
+            // No header: the tab is already called General, and a section
+            // titled the same thing directly under it says it twice.
+            Section {
+                // Segmented rather than a menu: three fixed choices, all of
+                // them short, and the current one worth seeing without opening
+                // anything.
+                Picker("settings.appearance", selection: $appearance) {
+                    ForEach(AppAppearance.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: appearance) { _, newValue in
+                    newValue.apply()
+                }
+
                 Toggle("settings.toggle.kill.on.terminate", isOn: $killOnTerminate)
                 Toggle("settings.toggle.menubar", isOn: $showMenuBarExtra)
                     .help("settings.toggle.menubar.help")
@@ -45,28 +95,48 @@ struct SettingsView: View {
                     subtitle: defaultBottleLocation.prettyPath(),
                     actionName: "create.browse"
                 ) {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = false
-                    panel.canChooseDirectories = true
-                    panel.allowsMultipleSelection = false
-                    panel.canCreateDirectories = true
-                    panel.directoryURL = BottleData.containerDir
-                    panel.begin { result in
-                        if result == .OK, let url = panel.urls.first {
-                            defaultBottleLocation = url
-                        }
-                    }
+                    chooseBottleLocation()
                 }
             }
+        }
+        .formStyle(.grouped)
+    }
+
+    /// The runtime: which engine is installed, and whether the app watches for
+    /// a newer one. The update toggle had a section of its own holding nothing
+    /// else, three sections away from the engine it updates.
+    private var wine: some View {
+        Form {
+            EngineSettingsSection()
             Section("settings.updates") {
                 Toggle("settings.toggle.nightcapwine.updates", isOn: $checkNightcapWineUpdates)
             }
-            EngineSettingsSection()
-            GPTKSettingsSection()
         }
         .formStyle(.grouped)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(width: ViewWidth.medium)
+    }
+
+    /// Both halves of Direct3D 12 on Metal: the payload you supply, and what is
+    /// still outstanding before a bottle can select D3DMetal.
+    private var graphics: some View {
+        Form {
+            GPTKSettingsSection()
+            MetalRequirementsSection()
+        }
+        .formStyle(.grouped)
+    }
+
+    private func chooseBottleLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = BottleData.containerDir
+        panel.begin { result in
+            if result == .OK, let url = panel.urls.first {
+                defaultBottleLocation = url
+            }
+        }
     }
 }
 

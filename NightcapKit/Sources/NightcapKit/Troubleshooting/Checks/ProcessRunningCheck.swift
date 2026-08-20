@@ -31,7 +31,16 @@ public struct ProcessRunningCheck: TroubleshootingCheck {
 
     public func run(params: [String: String], context: CheckContext) async -> CheckResult {
         let processName = params["process"] ?? "wineserver"
-        let count = ProcessRegistry.shared.getProcessCount(for: context.bottleURL)
+        var count = ProcessRegistry.shared.getProcessCount(for: context.bottleURL)
+
+        // The registry only tracks the short-lived `wine start` launcher; the
+        // program itself runs on under wineserver. A live wineserver is the
+        // durable signal, so an empty registry alone must not read as "nothing
+        // running" — that made the Steam checks branch to "restart the
+        // launcher" while Steam was demonstrably up.
+        if count == 0, await Wine.isWineserverRunning(forPrefixAt: context.bottleURL) {
+            count = 1
+        }
 
         let evidence = [
             "process": processName,

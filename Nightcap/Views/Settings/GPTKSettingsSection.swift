@@ -20,6 +20,13 @@ import NightcapKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Posted when the imported GPTK payload changes, so anything reporting on it
+/// reloads. The Metal checklist reads the payload independently of the section
+/// that imports it.
+extension Notification.Name {
+    static let gptkPayloadChanged = Notification.Name("gptkPayloadChanged")
+}
+
 /// Settings for Apple's Game Porting Toolkit payload: import from the
 /// user-supplied disk image, show what is stored, and deploy it only when the
 /// installed engine build can actually execute it.
@@ -32,36 +39,47 @@ struct GPTKSettingsSection: View {
 
     var body: some View {
         Section {
-            if let storedRecord {
-                LabeledContent("settings.gptk.version", value: storedRecord.gptkVersion)
-            } else {
-                Text("settings.gptk.status.none")
-                    .foregroundStyle(.secondary)
+            // One row in both states. It used to be a LabeledContent when a
+            // payload was present and a bare Text when it was not, so the row
+            // changed shape as you imported and the Import button moved with
+            // it. Now the state is a badge, the version is the row's machine
+            // slot, and the absent case fills the same line with prose.
+            NCRow(
+                title: String(localized: "settings.gptk.payload"),
+                caption: storedRecord == nil ? String(localized: "settings.gptk.status.none") : nil,
+                machine: storedRecord?.gptkVersion
+            ) {
+                if storedRecord != nil {
+                    NCStatusBadge(status: .ready, label: "settings.gptk.status.imported")
+                    Button("settings.gptk.remove", role: .destructive) {
+                        removePayload()
+                    }
+                    .controlSize(.small)
+                    .disabled(importing)
+                } else {
+                    NCStatusBadge(status: .missing, label: "settings.gptk.status.missing")
+                }
             }
 
-            HStack {
+            HStack(spacing: Theme.Space.snug) {
                 Button("settings.gptk.import") {
                     showImporter = true
                 }
                 .disabled(importing)
 
+                // Trails the button that started the work rather than sitting
+                // between two buttons and shoving the second one sideways
+                // whenever an import runs.
                 if importing {
                     ProgressView()
                         .controlSize(.small)
-                }
-
-                if storedRecord != nil {
-                    Button("settings.gptk.remove", role: .destructive) {
-                        removePayload()
-                    }
-                    .disabled(importing)
                 }
             }
         } header: {
             Text("settings.gptk")
         } footer: {
             Text(runtimeCapable ? "settings.gptk.capability.ok" : "settings.gptk.capability.blocked")
-                .font(.caption)
+                .font(Theme.Typography.rowCaption)
                 .foregroundStyle(.secondary)
         }
         .task {
@@ -83,7 +101,11 @@ struct GPTKSettingsSection: View {
             "settings.gptk.import.failed",
             isPresented: .init(
                 get: { importError != nil },
-                set: { if !$0 { importError = nil } }
+                set: {
+                    if !$0 {
+                        importError = nil
+                    }
+                }
             )
         ) {
             Button("button.ok", role: .cancel) {}
@@ -104,6 +126,10 @@ struct GPTKSettingsSection: View {
     private func refresh() {
         storedRecord = GPTKImporter.storedRecord()
         runtimeCapable = GPTKImporter.isRuntimeGPTKCapable()
+        // The Metal checklist reports on this payload but reads it separately,
+        // so importing or removing one left the checklist showing the previous
+        // answer until Settings was reopened.
+        NotificationCenter.default.post(name: .gptkPayloadChanged, object: nil)
     }
 
     private func importPayload(from url: URL) {
@@ -160,5 +186,62 @@ struct GPTKSettingsSection: View {
             importError = error.localizedDescription
         }
         refresh()
+    }
+}
+
+/// What Direct3D 12 on Metal still needs, said in one place.
+///
+/// Metal takes two separate pieces and each screen only knows its own half, so
+/// having one without the other reads as broken. This was a hand-drawn
+/// checklist inside the engine section's *footer*, three sections below the
+/// import it talks about and set in caption grey as though it were a footnote.
+/// It is a section of its own now, next to the payload it is about, and each
+/// line is an `NCChecklistRow` so its ticks match every other tick in the app.
+struct MetalRequirementsSection: View {
+    @State private var engineReady = false
+    @State private var payloadReady = false
+
+    private var bothPresent: Bool {
+        engineReady && payloadReady
+    }
+
+    var body: some View {
+        Section {
+            NCChecklistRow(
+                text: "settings.metal.engine",
+                isDone: engineReady,
+                // The way to satisfy the item, shown only while it is unmet —
+                // an instruction beside a green tick reads like a warning.
+                detail: engineReady ? nil : "settings.metal.engine.detail"
+            )
+            NCChecklistRow(
+                text: "settings.metal.payload",
+                isDone: payloadReady,
+                detail: payloadReady ? nil : "settings.metal.payload.detail"
+            )
+        } header: {
+            Text("settings.metal")
+        } footer: {
+            Text(bothPresent ? "settings.metal.ready" : "settings.metal.d3d11")
+                .font(Theme.Typography.rowCaption)
+                .foregroundStyle(.secondary)
+        }
+        .task { refresh() }
+        // Installing an engine is the one thing that can flip the first line
+        // from missing to met without this view being rebuilt.
+        .onReceive(NotificationCenter.default.publisher(for: .runtimeChanged)) { _ in
+            refresh()
+        }
+        // Importing or removing a payload is the other thing that flips a line.
+        .onReceive(NotificationCenter.default.publisher(for: .gptkPayloadChanged)) { _ in
+            refresh()
+        }
+    }
+
+    private func refresh() {
+        // Exactly what the engine footer asked before: the installed runtime's
+        // `gptkCapable` flag, which is all `isRuntimeGPTKCapable()` reads.
+        engineReady = GPTKImporter.isRuntimeGPTKCapable()
+        payloadReady = GPTKImporter.storedRecord() != nil
     }
 }

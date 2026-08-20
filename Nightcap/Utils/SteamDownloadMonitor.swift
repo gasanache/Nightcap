@@ -43,7 +43,6 @@ class SteamDownloadMonitor: ObservableObject {
     @Published var isMonitoring: Bool = false
 
     private let stallThreshold: TimeInterval = 180
-    private let samplingInterval: TimeInterval = 45
     private var lastSnapshot: [String: (size: UInt64, mtime: Date)] = [:]
     private var stallStartTime: Date?
     private var alertedThisSession: Set<String> = []
@@ -79,11 +78,6 @@ class SteamDownloadMonitor: ObservableObject {
         lastSnapshot = [:]
         stallStartTime = nil
         status = .noDownloads
-    }
-
-    /// Marks a bottle as "don't warn again" for this session.
-    func suppressWarnings(for bottleURL: URL) {
-        alertedThisSession.insert(bottleURL.path(percentEncoded: false))
     }
 
     // MARK: - Sampling
@@ -252,23 +246,8 @@ class SteamDownloadMonitor: ObservableObject {
 
         let stallMinutes = Int(duration / 60)
         logger.warning("Steam download stall detected: \(stallMinutes)min, evidence: \(evidence.count)")
-
-        NotificationCenter.default.post(
-            name: .steamDownloadStallDetected,
-            object: nil,
-            userInfo: [
-                "bottleURL": bottleURL, "duration": duration,
-                "evidence": evidence, "stallMinutes": stallMinutes
-            ]
-        )
+        // A `.steamDownloadStallDetected` notification used to be posted here;
+        // nothing in the app ever observed it. The `$status` publisher is how
+        // the stall reaches the Steam Library screen.
     }
-}
-
-// MARK: - Notification Name
-
-extension Notification.Name {
-    /// Posted when a Steam download stall is detected.
-    static let steamDownloadStallDetected = Notification.Name(
-        "com.gasanache.Nightcap.steamDownloadStallDetected"
-    )
 }

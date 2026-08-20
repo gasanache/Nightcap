@@ -26,23 +26,31 @@ struct DiagnosticsView: View {
     let programName: String
     let bottleName: String
     let timestamp: Date
+    /// The bottle the remediations act on. Without it every Apply button ended
+    /// in `onAction?(action)` with a nil handler — the user confirmed the
+    /// alert and nothing happened, silently, at all three presentation sites.
+    var bottle: Bottle?
 
     var onAction: ((RemediationAction) -> Void)?
     var onAnalyze: (() -> Void)?
+
+    @Environment(\.dismiss) private var dismiss
+    // Shared with DiagnosticsView+Apply.swift; `private` stops at the file.
+    @State var applyMessage: String?
 
     @State private var activeCategoryFilter: CrashCategory?
     @State private var searchText: String = ""
     @State private var logFilterMode: LogFilterMode = .all
     @State private var isLogExpanded: Bool = false
-    @State private var isOtherSuggestionsExpanded: Bool = false
+    @State var isOtherSuggestionsExpanded: Bool = false
 
-    private var resolvedRemediations: [RemediationAction] {
+    var resolvedRemediations: [RemediationAction] {
         guard let diagnosis else { return [] }
         let (_, remediations) = PatternLoader.loadDefaults()
         return diagnosis.remediations(from: remediations)
     }
 
-    private var primaryRemediations: [RemediationAction] {
+    var primaryRemediations: [RemediationAction] {
         resolvedRemediations.filter { action in
             guard let diagnosis else { return false }
             let confidence = confidenceTier(for: action, diagnosis: diagnosis)
@@ -50,7 +58,7 @@ struct DiagnosticsView: View {
         }
     }
 
-    private var lowConfidenceRemediations: [RemediationAction] {
+    var lowConfidenceRemediations: [RemediationAction] {
         resolvedRemediations.filter { action in
             guard let diagnosis else { return false }
             let confidence = confidenceTier(for: action, diagnosis: diagnosis)
@@ -59,12 +67,35 @@ struct DiagnosticsView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            if geometry.size.width >= 700 {
-                splitLayout
-            } else {
-                verticalLayout
+        VStack(spacing: 0) {
+            GeometryReader { geometry in
+                // The split threshold used to be 700 while every sheet
+                // presentation was exactly 600 wide, so the layout built for
+                // this screen was unreachable in the only context it appears.
+                if geometry.size.width >= 560 {
+                    splitLayout
+                } else {
+                    verticalLayout
+                }
             }
+            Divider()
+            HStack(spacing: Theme.Space.snug) {
+                if let applyMessage {
+                    Text(applyMessage)
+                        .font(Theme.Typography.rowCaption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: Theme.Space.snug)
+                // The app's main diagnostics screen is only ever a sheet, and
+                // it had no close control and no Escape handler — a modal with
+                // no exit.
+                Button("button.close") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(Theme.Space.card)
         }
     }
 
@@ -270,42 +301,6 @@ extension DiagnosticsView {
 // MARK: - Remediation Cards
 
 extension DiagnosticsView {
-    private var remediationCardsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(primaryRemediations) { action in
-                RemediationCardView(
-                    action: action,
-                    confidenceTier: diagnosis.map { confidenceTier(for: action, diagnosis: $0) } ?? .low,
-                    onAction: onAction
-                )
-            }
-
-            if !lowConfidenceRemediations.isEmpty {
-                DisclosureGroup(
-                    isExpanded: $isOtherSuggestionsExpanded
-                ) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(lowConfidenceRemediations) { action in
-                            RemediationCardView(
-                                action: action,
-                                confidenceTier: .low,
-                                onAction: onAction
-                            )
-                        }
-                    }
-                } label: {
-                    Text("Other things to try")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Log Section
-
-extension DiagnosticsView {
     private var logDisclosureSection: some View {
         DisclosureGroup(isExpanded: $isLogExpanded) {
             LogViewerView(
@@ -353,7 +348,7 @@ extension DiagnosticsView {
 // MARK: - Helpers
 
 extension DiagnosticsView {
-    private func confidenceTier(for action: RemediationAction, diagnosis: CrashDiagnosis) -> ConfidenceTier {
+    func confidenceTier(for action: RemediationAction, diagnosis: CrashDiagnosis) -> ConfidenceTier {
         var bestConfidence: Double = 0
         for match in diagnosis.matches {
             guard let actionIds = match.pattern.remediationActionIds,

@@ -16,7 +16,6 @@
 //  If not, see https://www.gnu.org/licenses/.
 //
 
-import AppKit
 import SwiftUI
 
 extension NightcapWineDownloadView {
@@ -32,20 +31,8 @@ extension NightcapWineDownloadView {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
-            HStack(spacing: 12) {
-                Button("setup.nightcapwine.copyDiagnostics") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(
-                        diagnostics.reportString(stage: "download", error: error),
-                        forType: .string
-                    )
-                }
-                .buttonStyle(.bordered)
-
-                Button("open.logs") {
-                    NightcapApp.openLogsFolder()
-                }
-                .buttonStyle(.bordered)
+            NCDiagnosticsActions {
+                diagnostics.reportString(stage: "download", error: error)
             }
 
             HStack(spacing: 12) {

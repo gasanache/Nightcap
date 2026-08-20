@@ -21,99 +21,62 @@ import SwiftUI
 
 struct ResolutionConfigSection: View {
     @ObservedObject var bottle: Bottle
-    @State private var hasRunningProcesses: Bool = false
+    /// Owned by ConfigView; see GraphicsConfigSection.
+    let hasRunningProcesses: Bool
     @State private var widthText: String = ""
     @State private var heightText: String = ""
-    @State private var isLoadingRegistryState: Bool = true
+
+    /// Wide enough for five digits and no wider, so the two fields and the ×
+    /// between them read as one measurement.
+    private static let dimensionFieldWidth: CGFloat = 80
 
     var body: some View {
-        Section("config.title.display") {
-            // Simple mode: read-only summary
-
-            // Advanced mode: full controls
-            Toggle(isOn: $bottle.settings.virtualDesktopEnabled) {
-                VStack(alignment: .leading) {
-                    Text("config.virtualDesktop")
-                    Text("config.virtualDesktop.info")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+        NCSection(title: "config.title.display", systemImage: "display") {
+            NCToggleRow(
+                title: "config.virtualDesktop",
+                isOn: $bottle.settings.virtualDesktopEnabled,
+                caption: "config.virtualDesktop.info"
+            )
             .onChange(of: bottle.settings.virtualDesktopEnabled) { _, enabled in
                 persistVirtualDesktop(enabled: enabled)
             }
 
             if bottle.settings.virtualDesktopEnabled {
-                Picker("config.virtualDesktop.resolution", selection: $bottle.settings.resolutionPreset) {
-                    ForEach(ResolutionPreset.allCases, id: \.self) { preset in
-                        Text(presetLabel(preset)).tag(preset)
-                    }
-                }
-                .onChange(of: bottle.settings.resolutionPreset) { _, _ in
-                    syncCustomFields()
-                    persistResolution()
-                }
+                resolutionPicker
 
                 if bottle.settings.resolutionPreset == .matchDisplay {
-                    matchDisplayHint
+                    matchDisplayNotice
                 }
 
                 if bottle.settings.resolutionPreset == .custom {
                     customResolutionFields
                 }
 
-                Text("config.virtualDesktop.nextLaunch")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                nextLaunchNotice
             }
 
             if hasRunningProcesses {
-                runningProcessWarning
+                runningProcessNotice
             }
         }
         .animation(.default, value: bottle.settings.virtualDesktopEnabled)
         .task {
             await loadRegistryState()
             syncCustomFields()
-            await checkRunningProcesses()
         }
     }
 
-    // MARK: - Simple Mode Summary
+    // MARK: - Resolution Picker
 
-    private var virtualDesktopSummary: some View {
-        HStack {
-            Text("config.virtualDesktop")
-                .foregroundStyle(.secondary)
-            Spacer()
-            if bottle.settings.virtualDesktopEnabled {
-                let res = currentResolutionSummary()
-                Text(res)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("config.virtualDesktop.off")
-                    .foregroundStyle(.secondary)
+    private var resolutionPicker: some View {
+        Picker("config.virtualDesktop.resolution", selection: $bottle.settings.resolutionPreset) {
+            ForEach(ResolutionPreset.allCases, id: \.self) { preset in
+                Text(presetLabel(preset)).tag(preset)
             }
         }
-    }
-
-    // MARK: - Match Display Hint
-
-    private var matchDisplayHint: some View {
-        HStack {
-            Image(systemName: "display")
-                .foregroundStyle(.secondary)
-            if let screen = NSScreen.main {
-                let pixelWidth = Int(screen.frame.width * screen.backingScaleFactor)
-                let pixelHeight = Int(screen.frame.height * screen.backingScaleFactor)
-                Text("config.virtualDesktop.matchDisplay \(pixelWidth) \(pixelHeight)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("config.virtualDesktop.matchDisplay.fallback")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+        .onChange(of: bottle.settings.resolutionPreset) { _, _ in
+            syncCustomFields()
+            persistResolution()
         }
     }
 
@@ -121,13 +84,13 @@ struct ResolutionConfigSection: View {
 
     private var customResolutionFields: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Theme.Space.tight) {
                 Text("config.virtualDesktop.width")
-                    .font(.caption)
+                    .font(Theme.Typography.rowCaption)
                     .foregroundStyle(.secondary)
                 TextField("1920", text: $widthText)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 80)
+                    .frame(width: Self.dimensionFieldWidth)
                     .onChange(of: widthText) { _, newValue in
                         if let val = Int(newValue) {
                             bottle.settings.customResolutionWidth = min(max(val, 640), 7_680)
@@ -137,16 +100,18 @@ struct ResolutionConfigSection: View {
                         validateAndPersistCustom()
                     }
             }
-            Text("\u{00D7}")
+            // A multiplication sign, not a word, so it is set verbatim rather
+            // than looked up in the string table.
+            Text(verbatim: "\u{00D7}")
                 .foregroundStyle(.secondary)
-                .padding(.top, 12)
-            VStack(alignment: .leading, spacing: 2) {
+                .padding(.top, Theme.Space.row)
+            VStack(alignment: .leading, spacing: Theme.Space.tight) {
                 Text("config.virtualDesktop.height")
-                    .font(.caption)
+                    .font(Theme.Typography.rowCaption)
                     .foregroundStyle(.secondary)
                 TextField("1080", text: $heightText)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 80)
+                    .frame(width: Self.dimensionFieldWidth)
                     .onChange(of: heightText) { _, newValue in
                         if let val = Int(newValue) {
                             bottle.settings.customResolutionHeight = min(max(val, 480), 4_320)
@@ -159,32 +124,7 @@ struct ResolutionConfigSection: View {
         }
     }
 
-    // MARK: - Running Process Warning
-
-    private var runningProcessWarning: some View {
-        HStack {
-            Image(systemName: "info.circle")
-                .foregroundStyle(.blue)
-            Text("config.virtualDesktop.processesRunning")
-                .font(.caption)
-            Spacer()
-        }
-        .padding(8)
-        .background(.blue.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-    }
-
     // MARK: - Helpers
-
-    func currentResolutionSummary() -> String {
-        let preset = bottle.settings.resolutionPreset
-        if let dims = preset.dimensions {
-            return "\(dims.width)x\(dims.height)"
-        }
-        if preset == .custom {
-            return "\(bottle.settings.customResolutionWidth)x\(bottle.settings.customResolutionHeight)"
-        }
-        return effectiveResolutionString()
-    }
 
     func presetLabel(_ preset: ResolutionPreset) -> String {
         switch preset {
@@ -201,11 +141,54 @@ struct ResolutionConfigSection: View {
         widthText = "\(bottle.settings.customResolutionWidth)"
         heightText = "\(bottle.settings.customResolutionHeight)"
     }
+}
 
-    func checkRunningProcesses() async {
-        let wineserverActive = await Wine.isWineserverRunning(for: bottle)
-        let trackedCount = ProcessRegistry.shared.getProcessCount(for: bottle)
-        hasRunningProcesses = wineserverActive || trackedCount > 0
+// MARK: - Notices
+
+/// This section used to say three things in three different shapes: a bare
+/// icon-and-caption pair, a caption on its own, and a tinted rounded rectangle.
+/// They are all notices now, and each declares how serious it is rather than
+/// leaving that to whichever colour was reached for at the time.
+extension ResolutionConfigSection {
+    /// What "Match Display" resolves to, so the choice is not taken on trust.
+    @ViewBuilder
+    private var matchDisplayNotice: some View {
+        if let screen = NSScreen.main {
+            let pixelWidth = Int(screen.frame.width * screen.backingScaleFactor)
+            let pixelHeight = Int(screen.frame.height * screen.backingScaleFactor)
+            NCNotice(
+                status: .unknown,
+                message: String(
+                    format: String(localized: "config.virtualDesktop.matchDisplay.notice"),
+                    "\(pixelWidth)\u{00D7}\(pixelHeight)"
+                ),
+                symbol: "display"
+            )
+        } else {
+            // The app asked the display how big it is and did not get an
+            // answer, which is a failed read rather than a note.
+            NCNotice(
+                status: .failed,
+                message: String(localized: "config.virtualDesktop.matchDisplay.fallback")
+            )
+        }
+    }
+
+    /// Nothing is wrong, but nothing has happened yet either.
+    private var nextLaunchNotice: some View {
+        NCNotice(
+            status: .unknown,
+            message: String(localized: "config.virtualDesktop.nextLaunch")
+        )
+    }
+
+    /// Something in this bottle is live, which is exactly why the resolution
+    /// cannot change underneath it.
+    private var runningProcessNotice: some View {
+        NCNotice(
+            status: .running,
+            message: String(localized: "config.virtualDesktop.processesRunning")
+        )
     }
 }
 
@@ -283,7 +266,6 @@ extension ResolutionConfigSection {
         } catch {
             // Registry query failed; leave defaults
         }
-        isLoadingRegistryState = false
     }
 
     func matchRegistryToPreset(width: Int, height: Int) {

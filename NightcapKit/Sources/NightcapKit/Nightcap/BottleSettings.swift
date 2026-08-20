@@ -925,12 +925,6 @@ public struct BottleSettings: Codable, Equatable {
         // Performance preset handling (nightcap-app/nightcap#1361 - FPS regression fix)
         populatePerformancePreset(builder: &builder)
 
-        // Shader cache control
-        if !shaderCacheEnabled {
-            builder.set("DXVK_SHADER_COMPILE_THREADS", "1", layer: .bottleManaged)
-            builder.set("__GL_SHADER_DISK_CACHE", "0", layer: .bottleManaged)
-        }
-
         // Force D3D11 mode - helps with compatibility (nightcap-app/nightcap#1361)
         if forceD3D11 {
             builder.set("D3DM_FORCE_D3D11", "1", layer: .bottleManaged)
@@ -1005,22 +999,11 @@ public struct BottleSettings: Codable, Equatable {
             }
         }
 
-        // Network timeout configuration
-        // Applied if user customized timeout (including launcher-set values)
-        // Launcher-specific timeouts are set via bottle.settings.networkTimeout by
-        // LauncherFixes.apply(), giving users control via UI slider
-        if networkTimeout != 60_000 { // If not default (60s)
-            builder.set("WINHTTP_CONNECT_TIMEOUT", String(networkTimeout), layer: .launcherManaged)
-            builder.set("WINHTTP_RECEIVE_TIMEOUT", String(networkTimeout * 2), layer: .launcherManaged)
-        }
-
-        // Connection pooling fixes for download stalls (nightcap-app/nightcap#1148, #1072, #1176)
-        builder.set("WINE_MAX_CONNECTIONS_PER_SERVER", "10", layer: .launcherManaged)
-        builder.set("WINE_FORCE_HTTP11", "1", layer: .launcherManaged) // HTTP/2 issues in Wine
-
-        // SSL/TLS compatibility for launchers
-        builder.set("WINE_ENABLE_SSL", "1", layer: .launcherManaged)
-        builder.set("WINE_SSL_VERSION_MIN", "TLS1.2", layer: .launcherManaged)
+        // The WINHTTP_*/WINE_MAX_CONNECTIONS/WINE_FORCE_HTTP11/WINE_ENABLE_SSL
+        // family that used to be set here does not exist in the shipped Wine —
+        // a binary grep over every dll and dylib in the runtime finds none of
+        // them — so the timeout slider and the download-stall "fixes" were
+        // placebo. Removed rather than kept for show.
 
         return launcherDLLOverrides
     }
@@ -1056,25 +1039,6 @@ public struct BottleSettings: Codable, Equatable {
         }
     }
 
-    /// Populates the audio layer of the environment builder.
-    ///
-    /// Audio configuration in Wine is **registry-backed**, not environment-variable-backed.
-    /// The audio driver (`HKCU\Software\Wine\Drivers\Audio`) and DirectSound buffer size
-    /// (`HKCU\Software\Wine\DirectSound\HelBuflen`) are applied via ``WineAudioRegistry``
-    /// methods, not through this layer populator.
-    ///
-    /// This method exists as the EnvironmentBuilder integration point for audio settings,
-    /// following the pattern of ``populateInputCompatibilityLayer(builder:)``. It is reserved
-    /// for future audio-related environment variables (e.g., `WINEDEBUG` channels for audio
-    /// debugging).
-    ///
-    /// - Parameter builder: The environment builder to populate.
-    public func populateAudioLayer(builder: inout EnvironmentBuilder) {
-        // Audio settings are applied via Wine registry (WineAudioRegistry), not env vars.
-        // This placeholder ensures the EnvironmentBuilder cascade has an audio integration
-        // point for future audio-related environment variables.
-    }
-
     /// Populates performance preset environment variables into the bottleManaged layer.
     private func populatePerformancePreset(builder: inout EnvironmentBuilder) {
         switch performancePreset {
@@ -1093,15 +1057,11 @@ public struct BottleSettings: Codable, Equatable {
             if !dxvkAsync {
                 builder.set("DXVK_ASYNC", "1", layer: .bottleManaged)
             }
-            // Use more aggressive shader compilation
-            builder.set("DXVK_SHADER_OPT_LEVEL", "0", layer: .bottleManaged)
             // Reduce Metal resource tracking overhead
             builder.set("MTL_ENABLE_METAL_EVENTS", "0", layer: .bottleManaged)
 
         case .quality:
             // Quality mode - prioritize visuals over performance
-            // Enable shader optimizations
-            builder.set("DXVK_SHADER_OPT_LEVEL", "2", layer: .bottleManaged)
             // Disable fast shader compile for better quality
             builder.set("D3DM_FAST_SHADER_COMPILE", "0", layer: .bottleManaged)
 
@@ -1109,23 +1069,20 @@ public struct BottleSettings: Codable, Equatable {
             // Unity games optimization (nightcap-app/nightcap#1313, #1312 - il2cpp fix)
             // Unity games often need specific memory and threading settings
 
-            // Fix for il2cpp loading issues
+            // Fix for il2cpp loading issues — present in the shipped Mono.
             builder.set("MONO_THREADS_SUSPEND", "1", layer: .bottleManaged)
-            // Increase file descriptor limit for Unity games
+            // Kept although absent from a binary grep of the runtime: LAA is a
+            // long-standing Wine variable and removing it risks a real
+            // regression for 32-bit Unity titles.
             builder.set("WINE_LARGE_ADDRESS_AWARE", "65536", layer: .bottleManaged)
 
             // Unity games often work better with D3D11
             if !forceD3D11 {
                 builder.set("D3DM_FORCE_D3D11", "1", layer: .bottleManaged)
             }
-
-            // Disable features that can cause issues with Unity's IL2CPP runtime
-            builder.set("WINE_HEAP_REUSE", "0", layer: .bottleManaged)
-            // Help with thread management for Unity's job system
-            builder.set("WINE_DISABLE_NTDLL_THREAD_REGS", "1", layer: .bottleManaged)
-
-            // Unity games may need more virtual memory
-            builder.set("WINEPRELOADRESERVE", "1", layer: .bottleManaged)
+            // WINE_HEAP_REUSE, WINE_DISABLE_NTDLL_THREAD_REGS and a malformed
+            // WINEPRELOADRESERVE used to be set here; none exist in the shipped
+            // binaries, so they were noise dressed as an il2cpp fix.
         }
     }
 

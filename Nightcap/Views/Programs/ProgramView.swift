@@ -21,10 +21,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ProgramView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     @ObservedObject var program: Program
     @State private var programLoading: Bool = false
     @State private var cachedIconImage: Image?
-    @State private var toast: ToastData?
     @State private var showTroubleshootingWizard: Bool = false
     @State private var hasActiveSession: Bool = false
     @AppStorage("configSectionExapnded") private var configSectionExpanded: Bool = true
@@ -77,13 +78,17 @@ struct ProgramView: View {
                 }
             }
         }
-        .sheet(isPresented: $showTroubleshootingWizard) {
+        .sheet(isPresented: $showTroubleshootingWizard, onDismiss: {
+            // Re-read the session state the banner shows; the view under a
+            // sheet does not re-fire onAppear when the sheet goes away.
+            hasActiveSession = sessionStore.hasActiveSession(for: program.bottle.url)
+        }, content: {
             TroubleshootingWizardView(
                 bottle: program.bottle,
                 program: program,
                 entryContext: .program(programURL: program.url, bottleURL: program.bottle.url)
             )
-        }
+        })
         .bottomBar {
             HStack {
                 Spacer()
@@ -127,7 +132,6 @@ struct ProgramView: View {
             }
             .padding()
         }
-        .toast($toast)
         .toolbar {
             if let image = cachedIconImage {
                 ToolbarItem(id: "ProgramViewIcon", placement: .navigation) {
@@ -172,7 +176,7 @@ struct ProgramView: View {
         Task {
             let result = await program.launchWithUserMode(useTerminal: useTerminal)
             withAnimation {
-                toast = result.toastData
+                result.announce(on: toastCentre)
             }
             programLoading = false
         }

@@ -21,10 +21,11 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct BottleListEntry: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     let bottle: Bottle
     @Binding var selected: URL?
     @Binding var refresh: Bool
-    @Binding var toast: ToastData?
 
     @State private var showBottleRename: Bool = false
     @State private var showBottleDuplicate: Bool = false
@@ -34,32 +35,40 @@ struct BottleListEntry: View {
     @State private var probeTask: Task<Void, Never>?
     @State private var duplicationPhase: DuplicationPhase?
 
+    /// The one leading marker. An unavailable bottle is `.missing` rather than
+    /// the raw orange triangle it used to draw, so it reads the same as every
+    /// other absent thing in the app.
+    private var status: NCStatus? {
+        if !bottle.isAvailable {
+            .missing
+        } else if runningCount > 0 {
+            .running
+        } else if hasOrphanProcesses {
+            .unknown
+        } else {
+            nil
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(name)
-                Spacer()
-                if runningCount > 0 {
-                    Text("\(runningCount)")
-                        .font(.caption2)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.blue.opacity(0.15))
-                        .clipShape(Capsule())
-                        .foregroundStyle(.blue)
-                } else if hasOrphanProcesses {
-                    Image(systemName: "exclamationmark.circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                        .help(String(localized: "bottle.orphan.tooltip"))
-                }
-            }
+        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            NCSidebarRow(
+                title: name,
+                status: status,
+                caption: bottle.isAvailable ? nil : String(localized: "bottle.unavailable.caption"),
+                isBusy: bottle.inFlight,
+                badgeCount: runningCount,
+                isDimmed: !bottle.isAvailable || bottle.inFlight
+            )
+            .help(hasOrphanProcesses ? String(localized: "bottle.orphan.tooltip") : "")
             if let phase = duplicationPhase {
                 duplicationProgressRow(phase: phase)
             }
         }
-        .opacity(bottle.isAvailable ? 1.0 : 0.5)
         .onAppear {
+            // The probe guards itself; this one only avoids starting a
+            // sixty-second timer that would have nothing to do.
+            guard bottle.isAvailable else { return }
             Task { await probeRunningState() }
             probeTask = Task {
                 while !Task.isCancelled {
@@ -99,25 +108,29 @@ struct BottleListEntry: View {
                             duplicationPhase = nil
                             selected = newURL
                             withAnimation {
-                                toast = ToastData(
-                                    message: String(
+                                toastCentre.show(
+                                    String(
                                         format: String(localized: "status.duplicateSuccess %@"),
                                         newName
                                     ),
-                                    style: .success
+                                    status: .ready
                                 )
                             }
                         }
+                    } catch is CancellationError {
+                        // The running-process guard was declined; nothing to
+                        // announce.
+                        await MainActor.run { duplicationPhase = nil }
                     } catch {
                         await MainActor.run {
                             duplicationPhase = nil
                             withAnimation {
-                                toast = ToastData(
-                                    message: String(
+                                toastCentre.show(
+                                    String(
                                         format: String(localized: "status.duplicateFailed %@"),
                                         error.localizedDescription
                                     ),
-                                    style: .error
+                                    status: .failed
                                 )
                             }
                         }
@@ -149,8 +162,10 @@ struct BottleListEntry: View {
                             let newBottePath = url
                                 .appending(path: bottle.url.lastPathComponent)
 
-                            bottle.move(destination: newBottePath)
-                            selected = newBottePath
+                            Task { @MainActor in
+                                await bottle.move(destination: newBottePath)
+                                selected = newBottePath
+                            }
                         }
                     }
                 }
@@ -177,24 +192,24 @@ struct BottleListEntry: View {
                                     try await bottle.exportAsArchive(destination: url)
                                     await MainActor.run {
                                         withAnimation {
-                                            toast = ToastData(
-                                                message: String(
+                                            toastCentre.show(
+                                                String(
                                                     format: String(localized: "status.exportSuccess %@"),
                                                     bottle.settings.name
                                                 ),
-                                                style: .success
+                                                status: .ready
                                             )
                                         }
                                     }
                                 } catch {
                                     await MainActor.run {
                                         withAnimation {
-                                            toast = ToastData(
-                                                message: String(
+                                            toastCentre.show(
+                                                String(
                                                     format: String(localized: "status.exportFailed %@"),
                                                     error.localizedDescription
                                                 ),
-                                                style: .error
+                                                status: .failed
                                             )
                                         }
                                     }
@@ -207,16 +222,27 @@ struct BottleListEntry: View {
             .disabled(!bottle.isAvailable || bottle.inFlight)
             .labelStyle(.titleAndIcon)
             Divider()
+            // Deliberately NOT disabled when the bottle is unavailable: a
+            // bottle Nightcap cannot find is precisely the one you want to go
+            // looking for. Finder handles a missing path gracefully.
             Button("button.showInFinder", systemImage: "folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([bottle.url])
             }
-            .disabled(!bottle.isAvailable)
             .labelStyle(.titleAndIcon)
         }
     }
 
+    /// The guard lives here rather than at the call sites: it was on `onAppear`
+    /// alone, and `onChange(of: refresh, initial: true)` walked straight past
+    /// it. A bottle whose folder is gone has no wineserver to find, and every
+    /// probe spawns a process.
     @MainActor
     private func probeRunningState() async {
+        guard bottle.isAvailable else {
+            runningCount = 0
+            hasOrphanProcesses = false
+            return
+        }
         let trackedCount = ProcessRegistry.shared.getProcessCount(for: bottle)
         runningCount = trackedCount
 
@@ -273,35 +299,32 @@ extension BottleListEntry {
     }
 
     func showRemoveAlert(bottle: Bottle) {
-        let checkbox = NSButton(
-            checkboxWithTitle: String(localized: "button.removeAlert.checkbox"),
-            target: self,
-            action: nil
-        )
-        let alert = NSAlert()
-        alert.messageText = String(
+        // The bottle name has to be substituted before the alert sees the title,
+        // so the format key is resolved here and handed over already finished.
+        // A resolved string is not a catalogue key, so the lookup inside
+        // `ncConfirm` misses and returns it unchanged.
+        let title = String(
             format: String(localized: "button.removeAlert.msg"),
             bottle.settings.name
         )
-        alert.informativeText = String(localized: "button.removeAlert.info")
-        alert.alertStyle = .warning
-        let delete = alert.addButton(withTitle: String(localized: "button.removeAlert.delete"))
-        delete.hasDestructiveAction = true
-        alert.addButton(withTitle: String(localized: "button.removeAlert.cancel"))
-        if bottle.isAvailable {
-            alert.accessoryView = checkbox
-        }
+        let choice = ncConfirm(
+            title: String.LocalizationValue(stringLiteral: title),
+            message: String(localized: "button.removeAlert.info"),
+            confirmTitle: "button.removeAlert.delete",
+            isDestructive: true,
+            // The checkbox only makes sense for a bottle whose files are there
+            // to delete; absent it, `remember` comes back false as before.
+            rememberTitle: bottle.isAvailable ? "button.removeAlert.checkbox" : nil
+        )
 
-        let response = alert.runModal()
+        guard choice.confirmed else { return }
 
-        if response == .alertFirstButtonReturn {
-            Task(priority: .userInitiated) {
-                if selected == bottle.url {
-                    selected = nil
-                }
-
-                await bottle.remove(delete: checkbox.state == .on)
+        Task(priority: .userInitiated) {
+            if selected == bottle.url {
+                selected = nil
             }
+
+            await bottle.remove(delete: choice.remember)
         }
     }
 }
@@ -310,7 +333,7 @@ extension BottleListEntry {
     BottleListEntry(
         bottle: Bottle(bottleUrl: URL(filePath: "")),
         selected: .constant(nil),
-        refresh: .constant(false),
-        toast: .constant(nil)
+        refresh: .constant(false)
     )
+    .environment(NCToastCenter())
 }

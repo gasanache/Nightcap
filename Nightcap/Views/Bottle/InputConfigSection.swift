@@ -19,143 +19,105 @@
 import NightcapKit
 import SwiftUI
 
-// swiftlint:disable type_body_length
 struct InputConfigSection: View {
     @ObservedObject var bottle: Bottle
     @StateObject private var controllerMonitor = ControllerMonitor()
-    @State private var controllersExpanded = true
 
     var body: some View {
-        // Always visible: nothing here is advanced enough to hide behind an arrow.
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Controller & Input", systemImage: "gamecontroller")
-                    .font(.headline)
-
+        // A real Section. This was a bare VStack wearing a `.font(.headline)`
+        // Label as a pretend header — which outranked the genuine section
+        // headers around it — handed to a grouped Form that had no idea it was
+        // meant to be a section at all.
+        NCSection(
+            title: "config.title.input",
+            systemImage: "gamecontroller",
+            accessory: {
                 if bottle.settings.controllerCompatibilityMode {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
+                    // Domain-neutral: this is Input, and the badge used to
+                    // borrow the launcher section's own "On".
+                    NCStatusBadge(status: .ready, label: "status.on")
                 }
+            },
+            content: { sectionContent }
+        )
+        .onAppear { controllerMonitor.startMonitoring() }
+        .onDisappear { controllerMonitor.stopMonitoring() }
+    }
+
+    /// Every explanation in this section used to live in a `.help()` tooltip,
+    /// so a user who did not hover learned nothing about what any of it did.
+    /// They are captions now.
+    ///
+    /// The children go straight into the `Section`, as they do in Graphics and
+    /// Performance. Wrapped in a `VStack` they were one Form row, so this was
+    /// the only page section drawing no separators between its own settings.
+    @ViewBuilder
+    private var sectionContent: some View {
+        NCToggleRow(
+            title: "config.controllerCompat",
+            isOn: $bottle.settings.controllerCompatibilityMode,
+            caption: "config.controllerCompat.caption"
+        )
+
+        if bottle.settings.controllerCompatibilityMode {
+            // Info notice about controller compatibility
+            controllerCompatInfoBanner
+
+            NCToggleRow(
+                title: "config.disableHIDAPI",
+                isOn: $bottle.settings.disableHIDAPI,
+                caption: "config.disableHIDAPI.caption"
+            )
+
+            NCToggleRow(
+                title: "config.allowBackgroundEvents",
+                isOn: $bottle.settings.allowBackgroundEvents,
+                caption: "config.allowBackgroundEvents.caption"
+            )
+
+            NCToggleRow(
+                title: "config.disableControllerMapping",
+                isOn: $bottle.settings.disableControllerMapping,
+                caption: "config.disableControllerMapping.caption"
+            )
+
+            NCToggleRow(
+                title: "config.useButtonLabels",
+                isOn: $bottle.settings.useButtonLabels,
+                caption: "config.useButtonLabels.caption"
+            )
+
+            // The onChange writes Wine registry keys, so it has to survive
+            // the conversion intact.
+            NCToggleRow(
+                title: "input.commandActsAsControl.title",
+                isOn: $bottle.settings.commandActsAsControl,
+                caption: "input.commandActsAsControl.caption"
+            )
+            .onChange(of: bottle.settings.commandActsAsControl) { _, newValue in
+                applyCommandKeyMapping(enabled: newValue)
             }
-            VStack(alignment: .leading, spacing: 12) {
-                // Main toggle for controller compatibility mode
-                Toggle("Controller Compatibility Mode", isOn: $bottle.settings.controllerCompatibilityMode)
-                    .help("""
-                    Enables workarounds for common game controller detection \
-                    and mapping issues on macOS (frankea/Nightcap#42)
-                    """)
+            .accessibilityIdentifier("input.commandActsAsControl")
 
-                if bottle.settings.controllerCompatibilityMode {
-                    // Info notice about controller compatibility
-                    controllerCompatInfoBanner
+            connectedControllersPanel
 
-                    Divider()
-
-                    // HIDAPI toggle
-                    Toggle("Disable HIDAPI", isOn: $bottle.settings.disableHIDAPI)
-                        .help("""
-                        Sets SDL_JOYSTICK_HIDAPI=0 to force SDL to use alternative \
-                        input backends. May improve detection for some controllers.
-                        """)
-
-                    // Background events toggle
-                    Toggle("Allow Background Events", isOn: $bottle.settings.allowBackgroundEvents)
-                        .help("""
-                        Sets SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1 to enable \
-                        controller input when the game window doesn't have focus.
-                        """)
-
-                    // Button mapping toggle (legacy)
-                    Toggle(
-                        "Disable Controller Mapping",
-                        isOn: $bottle.settings.disableControllerMapping
-                    )
-                    .help("""
-                    Sets SDL_GAMECONTROLLER_USE_BUTTON_LABELS=1 to preserve \
-                    native button layouts for PlayStation and Switch controllers \
-                    instead of converting to XInput format.
-                    """)
-
-                    // Native button labels toggle (new from Plan 02)
-                    Toggle("Use Native Button Labels", isOn: $bottle.settings.useButtonLabels)
-                        .help("""
-                        Preserves physical button positions (Cross/Circle) for \
-                        PlayStation controllers instead of XInput layout (A/B/X/Y).
-                        """)
-
-                    // Map macOS Cmd to Windows Ctrl inside Wine
-                    Toggle("Map Command Key to Windows Ctrl", isOn: $bottle.settings.commandActsAsControl)
-                        .help("""
-                        Sets LeftCommandIsCtrl/RightCommandIsCtrl in Wine's Mac \
-                        driver registry so Cmd+A/C/V/S register inside Wine apps \
-                        as Ctrl+A/C/V/S.
-                        """)
-                        .onChange(of: bottle.settings.commandActsAsControl) { _, newValue in
-                            applyCommandKeyMapping(enabled: newValue)
-                        }
-                        .accessibilityIdentifier("input.commandActsAsControl")
-
-                    Divider()
-
-                    // Connected Controllers subpanel
-                    connectedControllersPanel
-
-                    Divider()
-
-                    // Helpful links/info
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "questionmark.circle")
-                            .foregroundColor(.secondary)
-
-                        Text("""
-                        If controllers still don't work, try connecting via USB \
-                        instead of Bluetooth, or check if the game has native \
-                        controller support settings.
-                        """)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .padding(.vertical, 8)
-        }
-        .onAppear {
-            controllerMonitor.startMonitoring()
-        }
-        .onDisappear {
-            controllerMonitor.stopMonitoring()
+            NCNotice(status: .unknown, message: String(localized: "input.stillNotWorking"))
         }
     }
 
-    // MARK: - Info Banner
+    // MARK: - Info banner
 
+    /// Nothing is wrong and nothing is pending — this only says what the
+    /// switches below it do — so it is the quiet status with an info glyph,
+    /// rather than the hand-drawn blue rectangle that made the mildest note in
+    /// the section the loudest thing in it.
     private var controllerCompatInfoBanner: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .foregroundColor(.blue)
-                .font(.title3)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Controller Workarounds")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.blue)
-
-                Text("""
-                These settings modify SDL environment variables to improve \
-                controller detection and button mapping. Try different \
-                combinations if your controller isn't working correctly.
-                """)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 12)
-        .background(Color.blue.opacity(0.1))
-        .cornerRadius(8)
+        NCNotice(
+            status: .unknown,
+            message: String(localized: "input.workarounds.message"),
+            title: "input.workarounds.title",
+            symbol: "info.circle"
+        )
     }
 
     // MARK: - Connected Controllers Panel
@@ -164,7 +126,7 @@ struct InputConfigSection: View {
         // Always visible.
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Label("Connected Controllers", systemImage: "gamecontroller.fill")
+                Label("input.controllers.title", systemImage: "gamecontroller.fill")
                     .font(.subheadline)
                     .fontWeight(.medium)
 
@@ -189,11 +151,11 @@ struct InputConfigSection: View {
                 controllerActionButtons
 
                 // Last refreshed timestamp
-                Text(
-                    "Last refreshed: \(controllerMonitor.lastRefreshed, style: .relative) ago"
-                )
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                (Text("input.controllers.lastRefreshed")
+                    + Text(" ")
+                    + Text(controllerMonitor.lastRefreshed, style: .relative))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
         }
     }
@@ -205,12 +167,12 @@ struct InputConfigSection: View {
             HStack(spacing: 6) {
                 Image(systemName: "gamecontroller")
                     .foregroundStyle(.secondary)
-                Text("No controllers detected")
+                Text("input.controllers.none")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
-            Text("Try connecting via USB or check System Settings > Bluetooth")
+            Text("input.controllers.none.hint")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
@@ -256,7 +218,7 @@ struct InputConfigSection: View {
                     HStack(spacing: 4) {
                         Image(systemName: batterySymbol(level: level, state: controller.batteryState))
                             .font(.caption)
-                        Text("Battery: \(Int(level * 100))%")
+                        Text("input.controllers.battery \(Int(level * 100))")
                             .font(.caption)
                         if controller.batteryState == "charging" {
                             Image(systemName: "bolt.fill")
@@ -277,6 +239,9 @@ struct InputConfigSection: View {
 
     // MARK: - Bluetooth Warning Banner
 
+    /// A caution the user can act on — plug the pad in — so it takes the same
+    /// orange status and warning glyph as every other "you may want to change
+    /// something" notice, instead of a third hand-tinted rectangle.
     @ViewBuilder
     private var bluetoothWarningBanner: some View {
         let hasBluetoothController = controllerMonitor.controllers.contains {
@@ -284,20 +249,11 @@ struct InputConfigSection: View {
         }
 
         if hasBluetoothController {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundColor(.orange)
-                    .font(.caption)
-
-                Text("Bluetooth dropouts can break input; USB is more reliable")
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(Color.orange.opacity(0.1))
-            .cornerRadius(6)
+            NCNotice(
+                status: .missing,
+                message: String(localized: "input.bluetoothWarning"),
+                symbol: "exclamationmark.triangle.fill"
+            )
         }
     }
 
@@ -308,7 +264,7 @@ struct InputConfigSection: View {
             Button {
                 controllerMonitor.refresh()
             } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                Label("button.refresh", systemImage: "arrow.clockwise")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
@@ -316,7 +272,7 @@ struct InputConfigSection: View {
             Button {
                 copyControllerInfo()
             } label: {
-                Label("Copy Controller Info", systemImage: "doc.on.doc")
+                Label("input.controllers.copyInfo", systemImage: "doc.on.doc")
                     .font(.caption)
             }
             .buttonStyle(.borderless)
@@ -325,7 +281,7 @@ struct InputConfigSection: View {
             Spacer()
 
             // Test Input hint
-            Text("Test Input: System Settings > Game Controllers")
+            Text("input.controllers.testHint")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
@@ -392,5 +348,3 @@ struct InputConfigSection: View {
         }
     }
 }
-
-// swiftlint:enable type_body_length

@@ -5,7 +5,68 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.1] - 2026-08-20
+
+### Added
+- About window: app version, the Wine engine underneath it, and one press to copy both for a bug report
+- Appearance setting — System, Light or Dark; System by default
+- New app icon
+
+### Fixed
+- Pinned programs were wiped for good if the bottle's drive could not be read for a moment
+- Killing Wine processes on quit now actually happens; before it never ran
+- The kill-on-quit setting read On while behaving as Off until toggled once
+- Launched programs are tracked again, so process counts, the close-with-processes prompt and display-sleep prevention all work
+- A program that fails to start no longer reports "Launched"
+- Move, duplicate and export stop a running bottle first instead of working on a live prefix
+- Removing a bottle waits for it to stop before deleting files
+- Dependency rows refresh after an install instead of showing the old state
+- Dependency installs no longer time out after 10 minutes; .NET 4.8 has room to finish
+- A timed-out install says so instead of reporting exit code 15
+- Multi-step installs no longer report success when an earlier step failed
+- Install logs are saved to the bottle folder instead of vanishing with the window
+- Winetricks banner output is no longer recorded as installed components
+- The troubleshooter no longer records failed fixes as applied
+- Troubleshooter install steps install; its crash flow can reach the missing-dependency branch
+- "Something else" runs the general checks instead of escalating straight away
+- Apply and Install on crash diagnosis cards do what they say
+- The crash diagnosis window can be closed
+- The audio troubleshooter applies its fixes instead of only listing them
+- Troubleshoot Audio from a program's settings opens the wizard
+- Install on the missing-dependency banner installs
+- Enable verbose logging sets WINEDEBUG for the next launch
+- Troubleshoot on the crash banner targets the program that crashed
+- A second crash no longer dismisses its own banner early
+- Install engine from Settings works with the main window closed
+- Windows no longer overhang the app and lose their buttons
+- Only the install log scrolls, not the whole window with it
+- Return no longer creates bottles or pins with empty names
+- Escape closes the setup, audio and preset windows
+- Pins are reachable by keyboard and still launch on double click
+- Graphics and Display agree on whether the bottle is running
+- Show in Finder works for bottles that have gone missing
+- Missing bottles are no longer probed every minute
+- Menu bar launch errors and the per-program override switches showed placeholder text
+- The bottom bar drew a grey panel that stopped dead against the sidebar's rounded corner
+- "No troubleshooting history" sat left of centre
+
+### Changed
+- Bottle Configuration reordered: Graphics second, prefix contents grouped, Cleanup before Diagnostics
+- One look for every list, notice, badge and window across the app
+- Settings split into General, Wine and Graphics tabs
+- Bottle home rows carry a short description and a live process count
+- Settings explanations moved out of hover tooltips into visible text
+- Sidebar shows one row style, so missing bottles keep their right-click menu
+- Migrate menu item and its window name Whisky, which is the app they come from
+- Accent colour matches the new icon
+
+### Removed
+- Shader Cache toggle and the Network Timeout slider; neither changed anything
+- Duplicate Force D3D11 switch, which moved on its own when the other was set
+- View Diagnostics button that did nothing
+- "Don't show this again" on the preset preview, which was never read
+
+## [1.0.0] - 2026-08-13
 
 ### Removed
 - All analytics and telemetry. The PostHog dependency, the five anonymous
@@ -612,6 +673,5 @@ When adding entries to this changelog, use the following categories:
 - **Security** - Vulnerability fixes
 - **Documentation** - Documentation-only changes
 
-[Unreleased]: https://github.com/gasanache/Nightcap/compare/v3.0.0...HEAD
-[3.0.0]: https://github.com/gasanache/Nightcap/releases/tag/v3.0.0
-[2.5.0]: https://github.com/gasanache/Nightcap/releases/tag/v2.5.0
+[1.0.1]: https://github.com/gasanache/Nightcap/releases/tag/v1.0.1
+[1.0.0]: https://github.com/gasanache/Nightcap/releases/tag/v1.0.0

@@ -28,6 +28,10 @@ import SwiftUI
 struct AudioTroubleshootingWizardView: View {
     @ObservedObject var engine: AudioTroubleshootingEngine
     var onDismiss: () -> Void
+    /// Performs the fix itself. The engine only records and advances — without
+    /// this the wizard's Apply set nothing and still reported "Changes
+    /// applied" with a tick.
+    var onApplyFix: ((String) async -> Void)?
     var onOpenAdvanced: (() -> Void)?
 
     var body: some View {
@@ -54,6 +58,7 @@ struct AudioTroubleshootingWizardView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { onDismiss() }
+                        .keyboardShortcut(.cancelAction)
                 }
             }
         }
@@ -173,7 +178,10 @@ struct AudioTroubleshootingWizardView: View {
             Spacer()
             VStack(spacing: 8) {
                 Button(String(localized: "audio.troubleshoot.applyFix")) {
-                    engine.applyFix(actionId: actionId)
+                    Task { @MainActor in
+                        await onApplyFix?(actionId)
+                        engine.applyFix(actionId: actionId)
+                    }
                 }
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 Button(String(localized: "audio.troubleshoot.skipFix")) { engine.offerNextFix() }

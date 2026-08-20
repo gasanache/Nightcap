@@ -12,10 +12,10 @@
       "checkId": "crash.log_classify",
       "params": {},
       "on": {
-        "pass": "check_environment",
+        "pass": "check_dependencies",
         "fail": "check_graphics_backend",
-        "unknown": "check_environment",
-        "error": "check_environment"
+        "unknown": "check_dependencies",
+        "error": "check_dependencies"
       },
       "evidenceMap": {
         "primaryCategory": "Issue category",
@@ -36,11 +36,11 @@
         "scope": "program_or_bottle"
       },
       "on": {
-        "pass": "check_environment",
-        "already_configured": "check_environment",
+        "pass": "check_dependencies",
+        "already_configured": "check_dependencies",
         "fail": "fix_switch_backend",
-        "unknown": "check_environment",
-        "error": "check_environment"
+        "unknown": "check_dependencies",
+        "error": "check_dependencies"
       },
       "evidenceMap": {
         "current": "Current backend",
@@ -64,7 +64,7 @@
       "requiresConfirmation": false,
       "on": {
         "applied": "verify_fix",
-        "skipped": "check_environment"
+        "skipped": "check_dependencies"
       }
     },
     "check_dependencies": {
@@ -78,10 +78,10 @@
         "scope": "crash_related"
       },
       "on": {
-        "pass": "check_environment",
+        "pass": "check_winetricks",
         "fail": "fix_install_deps",
-        "unknown": "check_environment",
-        "error": "check_environment"
+        "unknown": "check_winetricks",
+        "error": "check_winetricks"
       },
       "evidenceMap": {
         "missingDeps": "Missing dependencies",
@@ -100,7 +100,7 @@
       "requiresConfirmation": true,
       "on": {
         "applied": "verify_fix",
-        "skipped": "check_environment"
+        "skipped": "check_winetricks"
       }
     },
     "check_winetricks": {

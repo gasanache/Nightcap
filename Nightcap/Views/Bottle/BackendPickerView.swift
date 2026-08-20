@@ -30,8 +30,8 @@ struct BackendPickerView: View {
     private let columns = [GridItem(.flexible()), GridItem(.flexible())]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            LazyVGrid(columns: columns, spacing: 12) {
+        VStack(alignment: .leading, spacing: Theme.Space.snug) {
+            LazyVGrid(columns: columns, spacing: Theme.Space.row) {
                 ForEach(GraphicsBackend.allCases, id: \.self) { backend in
                     BackendCard(
                         backend: backend,
@@ -55,11 +55,11 @@ struct BackendPickerView: View {
     private var helperText: some View {
         if selection == .recommended {
             Text("config.graphics.helperCurrently \(resolvedBackend.displayName)")
-                .font(.caption)
+                .font(Theme.Typography.rowCaption)
                 .foregroundStyle(.secondary)
         } else {
             Text("config.graphics.helperNextLaunch")
-                .font(.caption)
+                .font(Theme.Typography.rowCaption)
                 .foregroundStyle(.secondary)
         }
     }
@@ -68,6 +68,13 @@ struct BackendPickerView: View {
 // MARK: - BackendCard
 
 private struct BackendCard: View {
+    /// The selected border `NCCard` draws. `NCOptionCard` does not forward
+    /// `NCCard`'s `isSelected`, so the picker restates the one value it needs
+    /// rather than restating the whole card.
+    private static let selectedBorder: CGFloat = 2
+    /// How far a capability tag's colour lifts off the card behind it.
+    private static let tagFillOpacity: Double = 0.15
+
     let backend: GraphicsBackend
     let isSelected: Bool
     let isAvailable: Bool
@@ -77,80 +84,118 @@ private struct BackendCard: View {
     @State private var showRationale: Bool = false
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Image(systemName: iconName)
-                        .font(.title3)
-                        .foregroundStyle(isSelected ? .white : .secondary)
-                    Spacer()
-                    if let tag = tagLabel {
-                        Text(tag.text)
-                            .font(.caption2)
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(tag.color.opacity(isSelected ? 0.3 : 0.15), in: Capsule())
-                            .foregroundStyle(isSelected ? .white : tag.color)
-                    }
-                    if backend == .recommended {
-                        Button {
-                            showRationale.toggle()
-                        } label: {
-                            Image(systemName: "questionmark.circle")
-                                .font(.caption)
-                                .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .popover(isPresented: $showRationale) {
-                            Text(GraphicsBackendResolver.rationale())
-                                .font(.caption)
-                                .padding()
-                                .frame(maxWidth: 240)
-                        }
-                    }
-                }
-
-                Text(backend.displayName)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(isSelected ? .white : .primary)
-
-                if isAvailable {
-                    Text(backend.summary)
-                        .font(.caption2)
-                        .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
-                        .lineLimit(2)
-                } else {
-                    Text(unavailableReasonKey)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                if backend == .recommended, isSelected, let resolved = resolvedBackend {
-                    Text("config.graphics.currentlyUsing \(resolved.displayName)")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.7))
-                }
+        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            NCOptionCard(
+                title: titleKey,
+                detail: isAvailable ? summaryKey : unavailableReasonKey,
+                systemImage: iconName,
+                isAvailable: isAvailable,
+                action: action
+            ) {
+                accessory
             }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? Color.accentColor : Color(.controlBackgroundColor))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(
-                        isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
-                        lineWidth: isSelected ? 2 : 1
-                    )
-            )
+            .overlay {
+                selectionBorder
+            }
+
+            if backend == .recommended, isSelected, let resolved = resolvedBackend {
+                Text("config.graphics.currentlyUsing \(resolved.displayName)")
+                    .font(Theme.Typography.detail)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Selection is a heavier tinted border, the treatment `NCCard` settles on.
+    /// What was here before — a solid accent fill with forced white text — was
+    /// the app's only instance of it and unreadable in dark mode.
+    @ViewBuilder
+    private var selectionBorder: some View {
+        if isSelected {
+            RoundedRectangle(cornerRadius: Theme.Radius.card)
+                .strokeBorder(.tint, lineWidth: Self.selectedBorder)
+        }
+    }
+
+    /// The capability tag and — for Recommended only — the rationale popover,
+    /// on the card's trailing edge where the old top row already put them.
+    private var accessory: some View {
+        HStack(spacing: Theme.Space.tight) {
+            if let tag = tagLabel {
+                capabilityTag(tag)
+            }
+            if backend == .recommended {
+                rationaleButton
+            }
+        }
+    }
+
+    /// Deliberately not an `NCStatusBadge`. These four tags say what a backend
+    /// is *like* — fast, compatible, experimental, a fallback — which is a
+    /// different axis from whether a component is present or working. They
+    /// borrow `NCStatus`'s green, blue and orange, and that collision is worth
+    /// resolving, but not by quietly repainting editorial colour here.
+    private func capabilityTag(_ tag: (text: String, color: Color)) -> some View {
+        Text(tag.text)
+            .font(Theme.Typography.detail)
+            .fontWeight(.medium)
+            .padding(.horizontal, Theme.Space.snug)
+            .padding(.vertical, Theme.Space.tight)
+            .background(tag.color.opacity(Self.tagFillOpacity), in: Capsule())
+            .foregroundStyle(tag.color)
+    }
+
+    private var rationaleButton: some View {
+        Button {
+            showRationale.toggle()
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .font(Theme.Typography.rowCaption)
+                .foregroundStyle(.secondary)
         }
         .buttonStyle(.plain)
-        .disabled(!isAvailable)
-        .opacity(isAvailable ? 1 : 0.5)
+        .popover(isPresented: $showRationale) {
+            Text(GraphicsBackendResolver.rationale())
+                .font(Theme.Typography.rowCaption)
+                .padding(Theme.Space.card)
+                .frame(maxWidth: 240)
+        }
+    }
+
+    // MARK: - Labels
+
+    /// `NCOptionCard` labels a choice with catalogue keys, while
+    /// `GraphicsBackend.displayName` and `.summary` hand back already-resolved
+    /// `String`s. The card names the same entries the backend does rather than
+    /// looking a runtime value up as a key.
+    private var titleKey: LocalizedStringKey {
+        switch backend {
+        case .recommended:
+            "config.graphics.backend.recommended"
+        case .d3dMetal:
+            "config.graphics.backend.d3dMetal.name"
+        case .dxvk:
+            "config.graphics.backend.dxvk.name"
+        case .dxmt:
+            "config.graphics.backend.dxmt.name"
+        case .wined3d:
+            "config.graphics.backend.wined3d.name"
+        }
+    }
+
+    private var summaryKey: LocalizedStringKey {
+        switch backend {
+        case .recommended:
+            "config.graphics.backend.recommended.summary"
+        case .d3dMetal:
+            "config.graphics.backend.d3dMetal.summary"
+        case .dxvk:
+            "config.graphics.backend.dxvk.summary"
+        case .dxmt:
+            "config.graphics.backend.dxmt.summary"
+        case .wined3d:
+            "config.graphics.backend.wined3d.summary"
+        }
     }
 
     // MARK: - Unavailability

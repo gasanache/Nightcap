@@ -24,23 +24,16 @@ struct PinAddView: View {
     @State private var showingSheet = false
 
     var body: some View {
-        VStack {
-            Button {
-                showingSheet = true
-            } label: {
-                Image(systemName: "plus.circle")
-                    .resizable()
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .frame(width: 45, height: 45)
-            Spacer()
-            Text("pin.help")
-                .multilineTextAlignment(.center)
-                .lineLimit(2, reservesSpace: true)
-        }
-        .frame(width: 90, height: 90)
-        .padding(10)
+        // The same ``NCTile`` the pins themselves are, so the add tile lines up
+        // with them in ``BottleView``'s grid instead of mirroring their
+        // geometry by hand. `String(localized:)` because the tile's title is a
+        // runtime `String` — a `LocalizedStringKey` would look up the label
+        // text as a key and quietly render the fallback.
+        NCTile(
+            title: String(localized: "pin.help"),
+            systemImage: "plus.circle",
+            action: { showingSheet = true }
+        )
         .sheet(isPresented: $showingSheet) {
             PinCreationView(bottle: bottle)
         }

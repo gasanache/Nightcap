@@ -34,39 +34,84 @@ struct DLLOverrideEditor: View {
     @State private var newDLLName: String = ""
     @State private var newDLLMode: DLLOverrideMode = .nativeThenBuiltin
 
+    private var hasOverrides: Bool {
+        !managedOverrides.isEmpty || !customOverrides.isEmpty
+    }
+
+    /// One container, so the editor is a single thing wherever it lands.
+    ///
+    /// This used to return four unwrapped siblings, which meant each of its two
+    /// homes — a grouped `Form` section on the bottle, a plain `VStack` on the
+    /// program — spread and spaced them differently, and the same editor looked
+    /// like two different controls.
     var body: some View {
-        managedSection
-        customSection
-        addRow
-        presetsMenu
+        VStack(alignment: .leading, spacing: Theme.Space.row) {
+            if hasOverrides {
+                managedSection
+                customSection
+            } else {
+                emptyState
+            }
+
+            addRow
+
+            // When there is nothing yet, the presets menu is the empty state's
+            // own action rather than a second copy underneath it.
+            if hasOverrides {
+                presetsMenu
+            }
+        }
+    }
+
+    // MARK: - Empty State
+
+    /// Nothing overridden, and the one press that changes that.
+    ///
+    /// `config.dllOverrides.placeholder` reads "No DLL overrides configured",
+    /// which was being used as the *prompt of the name field* — so the box you
+    /// type a DLL into announced that the list was empty. It says that here
+    /// instead, where it is true.
+    private var emptyState: some View {
+        NCEmptyState(
+            systemImage: "puzzlepiece.extension",
+            title: "config.dllOverrides.placeholder",
+            message: "config.dllOverrides.empty.message"
+        ) {
+            presetsMenu
+        }
     }
 
     // MARK: - Managed Overrides Section
 
+    /// Overrides the app set, which the user cannot edit.
+    ///
+    /// The heading was `.caption` — smaller than the body-monospaced DLL names
+    /// underneath it, so the group read bottom-heavy. `NCSubsection` ranks it
+    /// below the section header above and above the rows below.
     @ViewBuilder
     private var managedSection: some View {
         if !managedOverrides.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("config.dllOverrides.managed")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            NCSubsection(title: "config.dllOverrides.managed") {
                 ForEach(managedOverrides, id: \.entry.dllName) { item in
-                    HStack {
-                        Image(systemName: "lock.fill")
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                        Text(item.entry.dllName)
-                            .font(.system(.body, design: .monospaced))
-                        Spacer()
-                        Text(item.entry.mode.displayName)
-                            .foregroundStyle(.secondary)
-                            .font(.caption)
-                        Text(item.source)
-                            .foregroundStyle(.tertiary)
-                            .font(.caption)
-                    }
-                    .padding(.vertical, 2)
+                    managedRow(item)
                 }
+            }
+        }
+    }
+
+    private func managedRow(_ item: (entry: DLLOverrideEntry, source: String)) -> some View {
+        NCRow(title: item.entry.dllName, isMachineTitle: true) {
+            HStack(spacing: Theme.Space.snug) {
+                Text(item.entry.mode.displayName)
+                    .font(Theme.Typography.rowCaption)
+                    .foregroundStyle(.secondary)
+                Text(item.source)
+                    .font(Theme.Typography.rowCaption)
+                    .foregroundStyle(.tertiary)
+                Image(systemName: "lock.fill")
+                    .font(Theme.Typography.rowCaption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(Text("config.dllOverrides.managed"))
             }
         }
     }
@@ -76,33 +121,45 @@ struct DLLOverrideEditor: View {
     @ViewBuilder
     private var customSection: some View {
         if !customOverrides.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("config.dllOverrides.custom")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            NCSubsection(title: "config.dllOverrides.custom") {
                 ForEach(Array(customOverrides.enumerated()), id: \.element.dllName) { index, entry in
-                    HStack {
-                        Text(entry.dllName)
-                            .font(.system(.body, design: .monospaced))
-                        warningIcon(for: entry.dllName)
-                        Spacer()
-                        Picker("", selection: modeBinding(at: index)) {
-                            ForEach(DLLOverrideMode.allCases, id: \.self) { mode in
-                                Text(mode.displayName).tag(mode)
-                            }
-                        }
-                        .labelsHidden()
-                        .frame(width: 200)
-                        Button {
-                            customOverrides.remove(at: index)
-                        } label: {
-                            Image(systemName: "minus.circle.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.vertical, 2)
+                    customRow(index: index, entry: entry)
                 }
+            }
+        }
+    }
+
+    /// One editable override, and — underneath it — whatever it is shadowing.
+    ///
+    /// The conflict used to be a yellow triangle whose entire explanation lived
+    /// in a `.help()` tooltip, so it reached only people who hovered. The
+    /// message is on screen now.
+    private func customRow(index: Int, entry: DLLOverrideEntry) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            NCRow(title: entry.dllName, isMachineTitle: true) {
+                HStack(spacing: Theme.Space.snug) {
+                    Picker("", selection: modeBinding(at: index)) {
+                        ForEach(DLLOverrideMode.allCases, id: \.self) { mode in
+                            Text(mode.displayName).tag(mode)
+                        }
+                    }
+                    .labelsHidden()
+                    Button {
+                        customOverrides.remove(at: index)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if let warning = warnings.first(where: { $0.dllName == entry.dllName }) {
+                NCNotice(
+                    status: .missing,
+                    message: warning.message,
+                    symbol: "exclamationmark.triangle.fill"
+                )
             }
         }
     }
@@ -110,10 +167,10 @@ struct DLLOverrideEditor: View {
     // MARK: - Add Row
 
     private var addRow: some View {
-        HStack {
-            TextField("config.dllOverrides.placeholder", text: $newDLLName)
+        HStack(spacing: Theme.Space.snug) {
+            TextField("config.dllOverrides.name.placeholder", text: $newDLLName)
                 .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
+                .font(Theme.Typography.machineTitle)
                 .frame(minWidth: 120)
                 .onChange(of: newDLLName) {
                     // Strip .dll suffix if the user types it
@@ -127,7 +184,6 @@ struct DLLOverrideEditor: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 200)
             Button {
                 addEntry()
             } label: {
@@ -147,9 +203,11 @@ struct DLLOverrideEditor: View {
             }
         }
     }
+}
 
-    // MARK: - Helpers
+// MARK: - Helpers
 
+extension DLLOverrideEditor {
     private func modeBinding(at index: Int) -> Binding<DLLOverrideMode> {
         Binding(
             get: {
@@ -162,16 +220,6 @@ struct DLLOverrideEditor: View {
                 customOverrides[index] = DLLOverrideEntry(dllName: entry.dllName, mode: newMode)
             }
         )
-    }
-
-    @ViewBuilder
-    private func warningIcon(for dllName: String) -> some View {
-        if let warning = warnings.first(where: { $0.dllName == dllName }) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
-                .font(.caption)
-                .help(warning.message)
-        }
     }
 
     private func entryExists(_ name: String) -> Bool {

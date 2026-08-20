@@ -23,7 +23,6 @@ import SwiftUI
 
 private let logger = Logger(subsystem: Bundle.nightcapBundleIdentifier, category: "ConfigView")
 
-// swiftlint:disable:next type_body_length
 struct ConfigView: View {
     @ObservedObject var bottle: Bottle
     @State private var buildVersion: String = ""
@@ -47,6 +46,12 @@ struct ConfigView: View {
     @State private var showRevertConfirmation: Bool = false
     @State private var showTroubleshootingWizard: Bool = false
     @State private var hasActiveSession: Bool = false
+    /// One copy of "is anything running", shared by Graphics and Display.
+    /// Each section kept its own one-shot copy before, so stopping the bottle
+    /// from Graphics cleared its own notice while Display, five rows down,
+    /// kept insisting processes were running.
+    @State private var hasRunningProcesses: Bool = false
+    @State private var troubleshootingReload: Int = 0
 
     private let sessionStore = TroubleshootingSessionStore()
 
@@ -78,103 +83,63 @@ struct ConfigView: View {
                 onRetryRetinaMode: loadRetinaMode,
                 onRetryDpi: loadDpi
             )
-            LauncherConfigSection(bottle: bottle)
-            InputConfigSection(bottle: bottle)
-            GraphicsConfigSection(bottle: bottle)
+            // Ordered by how often a section is actually used, not by the order
+            // the sections happened to be written. Graphics moves to second
+            // because it is the one people come here for; the three sections
+            // that describe what is *inside* the prefix sit together; and
+            // Cleanup — routine behaviour — now precedes Diagnostics, which is
+            // for when something has already gone wrong.
+            GraphicsConfigSection(
+                bottle: bottle,
+                hasRunningProcesses: hasRunningProcesses,
+                stopBottle: {
+                    await Wine.killBottleAndWait(bottle: bottle)
+                    await refreshRunningState()
+                }
+            )
+            ResolutionConfigSection(bottle: bottle, hasRunningProcesses: hasRunningProcesses)
             AudioConfigSection(bottle: bottle)
-            ResolutionConfigSection(bottle: bottle)
             PerformanceConfigSection(bottle: bottle)
+            InputConfigSection(bottle: bottle)
+            LauncherConfigSection(bottle: bottle)
             DLLOverrideConfigSection(bottle: bottle)
             DependencyConfigSection(bottle: bottle)
             SystemLibraryConfigSection(bottle: bottle)
             gameConfigRevertSection
-            Section("Diagnostics") {
-                Text("Analyze Wine crash output for troubleshooting guidance")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if hasActiveSession {
-                    TroubleshootingEntryBanner(bannerType: .resumeSession) {
-                        showTroubleshootingWizard = true
-                    }
-                }
-
-                Button(String(localized: "troubleshooting.entry.startGuided")) {
-                    showTroubleshootingWizard = true
-                }
-
-                Button("Export Diagnostic Report\u{2026}") {
-                    loadLatestDiagnosisAndExport()
-                }
-                .disabled(latestDiagnosis == nil && mostRecentlyDiagnosedProgram == nil)
-
-                Button("View Latest Diagnosis") {
-                    loadLatestDiagnosisAndView()
-                }
-                .disabled(mostRecentlyDiagnosedProgram == nil)
-
-                TroubleshootingHistoryView(
-                    bottleURL: bottle.url,
-                    programURL: nil
-                )
-            }
-            Section("Stability") {
-                Button("Generate Stability Diagnostics") {
-                    Task {
-                        stabilityDiagnosticReport = await StabilityDiagnostics.generateDiagnosticReport(for: bottle)
-                        showStabilityDiagnostics = true
-                    }
-                }
-                .help("Generates a bounded, privacy-safe report for issue triage.")
-
-                Button {
-                    Task {
-                        isRepairingPrefix = true
-                        defer {
-                            bottle.clearWineUsernameCache()
-                            isRepairingPrefix = false
-                        }
-                        do {
-                            try await Wine.repairPrefix(bottle: bottle)
-                            // Validate immediately after repair to confirm directories were created
-                            let result = WinePrefixValidation.validatePrefix(for: bottle)
-                            if result.isValid {
-                                prefixRepairResult = .success
-                            } else {
-                                prefixRepairResult = .failure(
-                                    String(localized: "config.repairPrefix.validationFailed")
-                                )
-                            }
-                        } catch {
-                            prefixRepairResult = .failure(error.localizedDescription)
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text("config.repairPrefix")
-                        if isRepairingPrefix {
-                            ProgressView()
-                                .controlSize(.small)
-                                .padding(.leading, 4)
-                        }
-                    }
-                }
-                .disabled(isRepairingPrefix)
-                .help("config.repairPrefix.help")
-            }
             CleanupConfigSection(bottle: bottle)
+            diagnosticsSection
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $showTroubleshootingWizard) {
+        .onChange(of: dpiSheetPresented) {
+            // An unset registry key reads as 0; the inspector's slider floors
+            // at 96, so it opened pinned below its own minimum with an
+            // invisible preview.
+            if dpiSheetPresented, dpiConfig < 96 {
+                dpiConfig = 96
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            Task { await refreshRunningState() }
+        }
+        .sheet(isPresented: $showTroubleshootingWizard, onDismiss: {
+            // The section stays mounted behind the sheet, so onAppear never
+            // re-fires: without this, finishing or discarding a session left
+            // a stale "Resume session" banner and a history missing the run.
+            hasActiveSession = sessionStore.hasActiveSession(for: bottle.url)
+            Task { await refreshRunningState() }
+            troubleshootingReload += 1
+        }, content: {
             TroubleshootingWizardView(
                 bottle: bottle,
                 program: nil,
                 entryContext: .bottleDiagnostics(bottleURL: bottle.url)
             )
-        }
+        })
         .sheet(isPresented: $showStabilityDiagnostics) {
             DiagnosticsReportView(
-                title: "Stability Diagnostics Report",
+                title: String(localized: "diagnostics.stability.title"),
                 report: stabilityDiagnosticReport,
                 defaultFilenamePrefix: "nightcap-stability-diagnostics"
             )
@@ -196,7 +161,8 @@ struct ConfigView: View {
                     logText: latestDiagnosisLogText,
                     programName: program.name,
                     bottleName: bottle.settings.name,
-                    timestamp: program.settings.lastDiagnosisDate ?? Date()
+                    timestamp: program.settings.lastDiagnosisDate ?? Date(),
+                    bottle: bottle
                 )
                 .frame(minWidth: 600, minHeight: 400)
             }
@@ -351,6 +317,101 @@ extension ConfigView {
 // MARK: - Game Config Revert
 
 extension ConfigView {
+    /// Diagnostics and Stability were two adjacent inline sections with raw
+    /// English titles doing one job between them — produce a report, repair the
+    /// prefix — and nothing said why "Generate Stability Diagnostics" was not
+    /// filed under Diagnostics. One section now.
+    var diagnosticsSection: some View {
+        Section("config.title.diagnostics") {
+            if hasActiveSession {
+                TroubleshootingEntryBanner(bannerType: .resumeSession) {
+                    showTroubleshootingWizard = true
+                }
+            } else {
+                Button(String(localized: "troubleshooting.entry.startGuided")) {
+                    showTroubleshootingWizard = true
+                }
+            }
+
+            Button("config.diagnostics.export") {
+                loadLatestDiagnosisAndExport()
+            }
+            .disabled(latestDiagnosis == nil && mostRecentlyDiagnosedProgram == nil)
+
+            Button("config.diagnostics.viewLatest") {
+                loadLatestDiagnosisAndView()
+            }
+            .disabled(mostRecentlyDiagnosedProgram == nil)
+
+            NCSubsection(title: "config.title.stability") {
+                generateStabilityReportButton
+                repairPrefixButton
+            }
+
+            TroubleshootingHistoryView(bottleURL: bottle.url, programURL: nil)
+                .id(troubleshootingReload)
+        }
+    }
+
+    /// What the report is came off a `.help()` in the merge and nothing took
+    /// its place, so the button stated only that it generated something. The
+    /// wording is the tooltip's, said out loud.
+    private var generateStabilityReportButton: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.tight) {
+            Button("config.stability.generate") {
+                Task {
+                    stabilityDiagnosticReport = await StabilityDiagnostics.generateDiagnosticReport(for: bottle)
+                    showStabilityDiagnostics = true
+                }
+            }
+            Text("config.stability.generate.caption")
+                .font(Theme.Typography.rowCaption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func refreshRunningState() async {
+        let wineserverActive = await Wine.isWineserverRunning(for: bottle)
+        let trackedCount = ProcessRegistry.shared.getProcessCount(for: bottle)
+        hasRunningProcesses = wineserverActive || trackedCount > 0
+    }
+
+    private var repairPrefixButton: some View {
+        Button {
+            Task {
+                isRepairingPrefix = true
+                defer {
+                    bottle.clearWineUsernameCache()
+                    isRepairingPrefix = false
+                }
+                do {
+                    try await Wine.repairPrefix(bottle: bottle)
+                    // Validate immediately after repair to confirm directories were created
+                    let result = WinePrefixValidation.validatePrefix(for: bottle)
+                    if result.isValid {
+                        prefixRepairResult = .success
+                    } else {
+                        prefixRepairResult = .failure(
+                            String(localized: "config.repairPrefix.validationFailed")
+                        )
+                    }
+                } catch {
+                    prefixRepairResult = .failure(error.localizedDescription)
+                }
+            }
+        } label: {
+            HStack(spacing: Theme.Space.snug) {
+                Text("config.repairPrefix")
+                if isRepairingPrefix {
+                    ProgressView().controlSize(.small)
+                }
+            }
+        }
+        .disabled(isRepairingPrefix)
+        .help("config.repairPrefix.help")
+    }
+
     @ViewBuilder
     var gameConfigRevertSection: some View {
         if let snapshot = gameConfigSnapshot {

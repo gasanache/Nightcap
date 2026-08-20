@@ -123,6 +123,7 @@ public final class ProcessRegistry: @unchecked Sendable {
         activeProcesses[bottle.url] = processes
 
         ensureDisplayWakeAssertionLocked()
+        notifyChanged()
 
         logger.info("Registered process '\(programName)' for bottle '\(bottle.url.lastPathComponent)'")
     }
@@ -178,6 +179,7 @@ public final class ProcessRegistry: @unchecked Sendable {
                 releaseDisplayWakeAssertionIfIdleLocked()
 
                 logger.info("Unregistered process '\(info.programName)' (PID: \(pid))")
+                notifyChanged()
                 return
             }
         }
@@ -228,14 +230,6 @@ public final class ProcessRegistry: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return activeProcesses[bottleURL]?.count ?? 0
-    }
-
-    /// Returns whether any active processes exist for a bottle identified by URL.
-    ///
-    /// - Parameter bottleURL: The URL of the bottle to check.
-    /// - Returns: `true` if the bottle has at least one tracked process.
-    public func hasActiveProcesses(for bottleURL: URL) -> Bool {
-        getProcessCount(for: bottleURL) > 0
     }
 
     // MARK: - Cleanup
@@ -322,6 +316,7 @@ public final class ProcessRegistry: @unchecked Sendable {
         activeProcesses[bottleURL] = nil
         releaseDisplayWakeAssertionIfIdleLocked()
         lock.unlock()
+        notifyChanged()
     }
 
     // MARK: - Display Wake Assertion

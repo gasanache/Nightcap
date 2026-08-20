@@ -206,15 +206,6 @@ extension DiagnosticExportSheet {
         try fileManager.moveItem(at: source, to: destination)
     }
 
-    private func loadDiagnosisHistory() -> DiagnosisHistory? {
-        let historyURL = bottle.url
-            .appending(path: "Program Settings")
-            .appending(path: program.name)
-            .appendingPathExtension("diagnosis-history.plist")
-        let history = DiagnosisHistory.load(from: historyURL)
-        return history.isEmpty ? nil : history
-    }
-
     private func loadRemediationTimeline() -> RemediationTimeline? {
         let timelineURL = bottle.url
             .appending(path: "Program Settings")

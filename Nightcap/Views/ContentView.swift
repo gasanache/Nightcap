@@ -23,6 +23,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     @AppStorage("selectedBottleURL") private var selectedBottleURL: URL?
     @EnvironmentObject var bottleVM: BottleVM
     @Binding var showSetup: Bool
@@ -30,14 +32,12 @@ struct ContentView: View {
     @State private var selected: URL?
     @State private var showBottleCreation: Bool = false
     @State private var bottlesLoaded: Bool = false
-    @State private var showBottleSelection: Bool = false
     @State private var newlyCreatedBottleURL: URL?
     @State private var openedFileURL: URL?
     @State private var triggerRefresh: Bool = false
     @State private var refreshAnimation: Angle = .degrees(0)
 
     @State private var bottleFilter = ""
-    @State private var toast: ToastData?
     @State private var corruptRegistryBackupURL: URL?
 
     var body: some View {
@@ -46,16 +46,15 @@ struct ContentView: View {
         } detail: {
             detail
         }
-        .toast($toast)
         .onReceive(NotificationCenter.default.publisher(for: .zombieProcessesCleaned)) { notification in
             if let count = notification.userInfo?["count"] as? Int, count > 0 {
                 withAnimation {
-                    toast = ToastData(
-                        message: String(
-                            format: String(localized: "cleanup.zombies.toast"),
+                    toastCentre.show(
+                        String(
+                            format: String(localized: "cleanup.zombies.toast.bottles"),
                             count
                         ),
-                        style: .info
+                        status: .available
                     )
                 }
             }
@@ -154,8 +153,7 @@ struct ContentView: View {
             FileOpenView(
                 fileURL: url,
                 currentBottle: selected,
-                bottles: bottleVM.bottles,
-                toast: $toast
+                bottles: bottleVM.bottles
             )
         }
         .onChange(of: selected) { oldValue, newValue in
@@ -166,17 +164,24 @@ struct ContentView: View {
                   let oldBottle = bottleVM.bottles.first(where: { $0.url == oldURL })
             else { return }
 
-            let count = ProcessRegistry.shared.getProcessCount(for: oldBottle)
-            guard count > 0 else { return }
+            // The registry only holds the short-lived launcher process; the
+            // running program lives on under wineserver. Gating on the count
+            // alone made this whole policy unreachable — the sole path that
+            // ever sets `.alwaysStop`/`.alwaysKeepRunning` is the alert below.
+            Task { @MainActor in
+                let count = ProcessRegistry.shared.getProcessCount(for: oldBottle)
+                let serverAlive = await Wine.isWineserverRunning(for: oldBottle)
+                guard count > 0 || serverAlive else { return }
 
-            switch oldBottle.settings.closeWithProcessesPolicy {
-            case .alwaysKeepRunning:
-                break
-            case .alwaysStop:
-                Wine.killBottle(bottle: oldBottle)
-                ProcessRegistry.shared.clearRegistry(for: oldBottle.url)
-            case .ask:
-                showProcessCloseAlert(for: oldBottle)
+                switch oldBottle.settings.closeWithProcessesPolicy {
+                case .alwaysKeepRunning:
+                    break
+                case .alwaysStop:
+                    await Wine.killBottleAndWait(bottle: oldBottle)
+                    ProcessRegistry.shared.clearRegistry(for: oldBottle.url)
+                case .ask:
+                    showProcessCloseAlert(for: oldBottle)
+                }
             }
         }
         .handlesExternalEvents(preferring: [], allowing: ["*"])
@@ -248,42 +253,18 @@ extension ContentView {
         ScrollViewReader { proxy in
             List(selection: $selected) {
                 Section {
+                    // One row shape for all three states. Two of them used to be
+                    // written out here with their own layouts and their own
+                    // opacities, which is why an unavailable bottle lost the
+                    // context menu — and with it "Show in Finder", the one
+                    // action a missing bottle actually needs.
                     ForEach(filteredBottles) { bottle in
-                        Group {
-                            if bottle.inFlight {
-                                HStack {
-                                    Text(bottle.settings.name)
-                                    Spacer()
-                                    ProgressView().controlSize(.small)
-                                }
-                                .opacity(0.5)
-                            } else if !bottle.isAvailable {
-                                HStack {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
-                                        .font(.caption)
-                                    Text(bottle.settings.name)
-                                    Spacer()
-                                    Button {
-                                        Task { await bottle.remove(delete: false) }
-                                    } label: {
-                                        Image(systemName: "xmark.circle")
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("button.removeFromList.help")
-                                }
-                                .opacity(0.6)
-                                .selectionDisabled(true)
-                            } else {
-                                BottleListEntry(
-                                    bottle: bottle,
-                                    selected: $selected,
-                                    refresh: $triggerRefresh,
-                                    toast: $toast
-                                )
-                            }
-                        }
+                        BottleListEntry(
+                            bottle: bottle,
+                            selected: $selected,
+                            refresh: $triggerRefresh
+                        )
+                        .selectionDisabled(!bottle.isAvailable)
                         .id(bottle.url)
                     }
                 }
@@ -304,39 +285,42 @@ extension ContentView {
         }
     }
 
+    /// Every reachable state says something.
+    ///
+    /// Two of them used to draw nothing at all: a selection pointing at a
+    /// bottle that is no longer in the list, and bottles existing while none is
+    /// chosen. Both left an empty pane with no explanation and no way out.
     @ViewBuilder
     var detail: some View {
-        if let bottle = selected {
-            if let bottle = bottleVM.bottles.first(where: { $0.url == bottle }) {
-                BottleView(bottle: bottle)
-                    .disabled(bottle.inFlight)
-                    .id(bottle.url)
+        if let selectedURL = selected,
+           let bottle = bottleVM.bottles.first(where: { $0.url == selectedURL }) {
+            BottleView(bottle: bottle)
+                .disabled(bottle.inFlight)
+                .id(bottle.url)
+        } else if !bottlesLoaded {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if bottleVM.bottles.isEmpty || bottleVM.countActive() == 0 {
+            NCEmptyState(
+                systemImage: "shippingbox",
+                title: "main.createFirst",
+                message: "main.createFirst.message"
+            ) {
+                Button {
+                    showBottleCreation.toggle()
+                } label: {
+                    Label("button.createBottle", systemImage: "plus")
+                        .padding(Theme.Space.tight)
+                }
+                .buttonStyle(.borderedProminent)
             }
         } else {
-            if bottleVM.bottles.isEmpty || bottleVM.countActive() == 0, bottlesLoaded {
-                VStack(spacing: 14) {
-                    Image(systemName: "shippingbox")
-                        .font(.system(size: 42, weight: .light))
-                        .foregroundStyle(.tertiary)
-                    Text("main.createFirst")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                    Button {
-                        showBottleCreation.toggle()
-                    } label: {
-                        HStack {
-                            Image(systemName: "plus")
-                            Text("button.createBottle")
-                        }
-                        .padding(6)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.accentColor)
-                }
-                // Without an explicit fill the stack is only as big as its
-                // content, so where it lands is left to the split view rather
-                // than being centred on purpose.
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            NCEmptyState(
+                systemImage: "sidebar.left",
+                title: "main.selectBottle",
+                message: "main.selectBottle.message"
+            ) {
+                EmptyView()
             }
         }
     }

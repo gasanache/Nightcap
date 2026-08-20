@@ -106,7 +106,7 @@
       "phase": "fix",
       "title": "Adjust DirectSound buffer size",
       "description": "Setting the DirectSound buffer to the recommended size to reduce audio crackling and latency.",
-      "fixId": "set-registry-value",
+      "fixId": "set-buffer-size",
       "fixPreview": {
         "settingName": "DirectSound Buffer Size",
         "currentValueKey": "currentValue",
@@ -118,6 +118,9 @@
       "on": {
         "applied": "verify_fix",
         "skipped": "check_sample_rate"
+      },
+      "params": {
+        "preset": "stable"
       }
     },
     "check_sample_rate": {

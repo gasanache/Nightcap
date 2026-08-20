@@ -24,12 +24,13 @@ import SwiftUI
 /// At a Glance, Recommended Configuration, Variants, What It Changes,
 /// Notes / Known Issues, and Provenance.
 struct GameEntryDetailView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     let entry: GameDBEntry
     @ObservedObject var bottle: Bottle
     @State private var selectedVariant: GameConfigVariant?
     @State private var showPreviewSheet: Bool = false
     @State private var stalenessResult: StalenessResult?
-    @State private var toast: ToastData?
 
     var body: some View {
         ScrollView {
@@ -43,15 +44,13 @@ struct GameEntryDetailView: View {
             .formStyle(.grouped)
         }
         .navigationTitle(entry.title)
-        .toast($toast)
         .sheet(isPresented: $showPreviewSheet) {
             if let variant = selectedVariant {
                 GameConfigPreviewSheet(
                     entry: entry,
                     variant: variant,
                     bottle: bottle,
-                    programURL: nil,
-                    toast: $toast
+                    programURL: nil
                 )
             }
         }
@@ -494,60 +493,3 @@ private struct SettingDisplay: Identifiable {
         name
     }
 }
-
-private struct FlowLayout: Layout {
-    var spacing: CGFloat = 6
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        flowLayout(proposal: proposal, subviews: subviews).size
-    }
-
-    func placeSubviews(
-        in bounds: CGRect,
-        proposal: ProposedViewSize,
-        subviews: Subviews,
-        cache: inout ()
-    ) {
-        let result = flowLayout(proposal: proposal, subviews: subviews)
-        for (index, position) in result.positions.enumerated() where index < subviews.count {
-            subviews[index].place(
-                at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y),
-                proposal: .unspecified
-            )
-        }
-    }
-
-    private struct FlowResult {
-        var positions: [CGPoint]
-        var size: CGSize
-    }
-
-    private func flowLayout(proposal: ProposedViewSize, subviews: Subviews) -> FlowResult {
-        let maxWidth = proposal.width ?? .infinity
-        var positions: [CGPoint] = []
-        var currentX: CGFloat = 0
-        var currentY: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        var totalWidth: CGFloat = 0
-
-        for subview in subviews {
-            let size = subview.sizeThatFits(.unspecified)
-            if currentX + size.width > maxWidth, currentX > 0 {
-                currentX = 0
-                currentY += lineHeight + spacing
-                lineHeight = 0
-            }
-            positions.append(CGPoint(x: currentX, y: currentY))
-            lineHeight = max(lineHeight, size.height)
-            currentX += size.width + spacing
-            totalWidth = max(totalWidth, currentX - spacing)
-        }
-
-        return FlowResult(
-            positions: positions,
-            size: CGSize(width: totalWidth, height: currentY + lineHeight)
-        )
-    }
-}
-
-// swiftlint:enable file_length

@@ -169,6 +169,15 @@ public enum FixApplicator { // swiftlint:disable:this type_body_length
                 isReversible: true
             )
 
+        case "fix-env-var":
+            return FixPreview(
+                settingName: "Launcher Compatibility Mode",
+                currentValue: bottle.settings.launcherCompatibilityMode ? "Enabled" : "Disabled",
+                newValue: "Enabled",
+                scope: "bottle",
+                isReversible: true
+            )
+
         case "install-winetricks-verb":
             let verb = params["verb"] ?? "unknown"
             return FixPreview(
@@ -306,6 +315,20 @@ public enum FixApplicator { // swiftlint:disable:this type_body_length
                 result: .applied
             )
 
+        case "fix-env-var":
+            // "Fix launcher environment" — the real mechanism behind that
+            // promise is launcher compatibility mode, which owns the known
+            // launcher environment fixes. The flow nodes carry no key/value
+            // params, so there is nothing more granular to set.
+            let before = String(bottle.settings.launcherCompatibilityMode)
+            bottle.settings.launcherCompatibilityMode = true
+            return FixAttempt(
+                fixId: fixId,
+                beforeValue: before,
+                afterValue: "true",
+                result: .applied
+            )
+
         case "install-winetricks-verb":
             // Winetricks installation is async and non-reversible.
             // The actual install is delegated to the Winetricks infrastructure.
@@ -379,6 +402,11 @@ public enum FixApplicator { // swiftlint:disable:this type_body_length
         program: Program?
     ) -> Bool {
         switch attempt.fixId {
+        case "fix-env-var":
+            let restored = attempt.beforeValue == "true"
+            bottle.settings.launcherCompatibilityMode = restored
+            return true
+
         case "switch-backend":
             guard let before = attempt.beforeValue,
                   let backend = GraphicsBackend(rawValue: before)

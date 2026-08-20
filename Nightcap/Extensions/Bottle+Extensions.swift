@@ -225,13 +225,46 @@ extension Bottle {
         }
     }
 
+    /// Refuses to run a whole-prefix operation over a live wineserver.
+    ///
+    /// `remove` always had this check; move, duplicate and export did not —
+    /// and move is the dangerous one, renaming a prefix a live wineserver
+    /// holds open, while duplicate and export produce a torn copy of a prefix
+    /// being written to. One guard, one alert, `killBottleAndWait` rather than
+    /// a fire-and-forget kill and a hoped-for two seconds.
+    ///
+    /// - Returns: `true` when it is safe to proceed.
+    @MainActor
+    private func ensureStoppedForMaintenance() async -> Bool {
+        let isRunning = await Wine.isWineserverRunning(for: self)
+        let trackedCount = ProcessRegistry.shared.getProcessCount(for: self)
+        guard isRunning || trackedCount > 0 else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = String(localized: "bottle.remove.hasProcesses.title")
+        alert.informativeText = String(localized: "bottle.remove.hasProcesses.message")
+        alert.alertStyle = .warning
+        let stopAndContinue = alert.addButton(
+            withTitle: String(localized: "bottle.remove.hasProcesses.stopAndRemove")
+        )
+        stopAndContinue.hasDestructiveAction = true
+        alert.addButton(withTitle: String(localized: "bottle.remove.hasProcesses.cancel"))
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+
+        await Wine.killBottleAndWait(bottle: self)
+        ProcessRegistry.shared.clearRegistry(for: url)
+        return true
+    }
+
     /// Moves the bottle to a new location.
     ///
     /// Thin adapter over `BottleOperations.move`, which owns the
     /// rewrite-before-move and rollback-on-failure semantics for pins and
     /// blocklist URLs.
     @MainActor
-    func move(destination: URL) {
+    func move(destination: URL) async {
+        guard await ensureStoppedForMaintenance() else { return }
         BottleOperations.move(bottleAt: url, to: destination, registry: BottleVM.shared)
     }
 
@@ -243,6 +276,7 @@ extension Bottle {
     /// - Throws: `TarError` if the archive operation fails, or an error if the bottle is not found.
     @MainActor
     func exportAsArchive(destination: URL) async throws {
+        guard await ensureStoppedForMaintenance() else { return }
         try await BottleOperations.export(bottleAt: url, to: destination, registry: BottleVM.shared)
     }
 
@@ -260,7 +294,10 @@ extension Bottle {
         newName: String,
         progress: (@Sendable (DuplicationPhase) -> Void)? = nil
     ) async throws -> URL {
-        try await BottleOperations.duplicate(
+        guard await ensureStoppedForMaintenance() else {
+            throw CancellationError()
+        }
+        return try await BottleOperations.duplicate(
             bottleAt: url,
             newName: newName,
             registry: BottleVM.shared,
@@ -288,8 +325,9 @@ extension Bottle {
             let response = alert.runModal()
             guard response == .alertFirstButtonReturn else { return }
 
-            Wine.killBottle(bottle: self)
-            try? await Task.sleep(for: .seconds(2))
+            // Waits for the server to actually go down; the old fixed 2 s
+            // sleep raced the kill and could delete files still being written.
+            await Wine.killBottleAndWait(bottle: self)
             ProcessRegistry.shared.clearRegistry(for: url)
         }
 

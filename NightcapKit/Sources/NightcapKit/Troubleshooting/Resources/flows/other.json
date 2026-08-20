@@ -1,0 +1,65 @@
+{
+  "categoryId": "other",
+  "version": 1,
+  "entryNodeId": "check_environment",
+  "nodes": {
+    "check_environment": {
+      "id": "check_environment",
+      "type": "check",
+      "phase": "checks",
+      "title": "Check environment configuration",
+      "description": "Running the general environment checks that apply to any Wine problem.",
+      "checkId": "env.check_var",
+      "params": {
+        "vars": "WINEPREFIX,WINEARCH,WINEDLLOVERRIDES"
+      },
+      "on": {
+        "pass": "check_processes",
+        "fail": "check_processes",
+        "already_configured": "check_processes",
+        "unknown": "check_processes",
+        "error": "check_processes"
+      }
+    },
+    "check_processes": {
+      "id": "check_processes",
+      "type": "check",
+      "phase": "checks",
+      "title": "Check running Wine processes",
+      "description": "Looking at what is currently running in this bottle, which narrows down where the problem can be.",
+      "checkId": "process.running_check",
+      "params": {},
+      "on": {
+        "pass": "gather_details",
+        "fail": "gather_details",
+        "unknown": "gather_details",
+        "error": "gather_details"
+      }
+    },
+    "gather_details": {
+      "id": "gather_details",
+      "type": "info",
+      "phase": "checks",
+      "title": "Gather details",
+      "description": "This problem does not match one of the guided categories. The most useful next step is a diagnostics export: it bundles the findings above with the relevant logs so the issue can be looked at properly.",
+      "on": {
+        "continue": "escalate"
+      }
+    },
+    "escalate": {
+      "id": "escalate",
+      "type": "info",
+      "phase": "export",
+      "title": "Additional diagnostics needed",
+      "description": "The general checks did not point at a specific cause. Export a session report to capture the evidence.",
+      "fragmentRef": "export-escalation"
+    },
+    "resolved": {
+      "id": "resolved",
+      "type": "info",
+      "phase": "export",
+      "title": "Problem resolved",
+      "description": "The issue has been fixed. You can export a session report for your records."
+    }
+  }
+}

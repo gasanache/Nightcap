@@ -30,11 +30,14 @@ enum BottleSetupStep: Int, CaseIterable, Identifiable {
 
     var id: Int { rawValue }
 
-    var title: String {
+    /// A catalog key, not a display string: wrapping a runtime String in
+    /// `LocalizedStringKey` looks up text that was never a key, so it silently
+    /// falls back to English and localisation never happens.
+    var title: LocalizedStringKey {
         switch self {
-        case .metal: "Metal graphics"
-        case .runtimes: "Visual C++ runtimes"
-        case .libraries: "Windows libraries"
+        case .metal: "setup.bottle.step.metal"
+        case .runtimes: "setup.bottle.step.runtimes"
+        case .libraries: "setup.bottle.step.libraries"
         }
     }
 }
@@ -78,18 +81,34 @@ struct BottleSetupRecommendationSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                stepContent
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        NCSheet(
+            title: step.title,
+            eyebrow: "setup.bottle.step.eyebrow \(step.rawValue + 1) \(BottleSetupStep.allCases.count)",
+            progress: Double(step.rawValue + 1) / Double(BottleSetupStep.allCases.count)
+        ) {
+            stepContent
+        } footer: {
+            Text("setup.bottle.footer \(bottle.settings.name)")
+                .font(Theme.Typography.detail)
+                .foregroundStyle(.tertiary)
+                .lineLimit(2)
+            NCFooterSpacer()
+            // The wizard had no dismissal at all — the only way out was to
+            // click through all three steps. Escape now leaves it, and
+            // everything here is reachable later in Bottle Configuration.
+            Button("button.cancel") {
+                onFinish(nil)
+                dismiss()
             }
-            Divider()
-            footer
+            .keyboardShortcut(.cancelAction)
+            if step != .metal {
+                Button("button.back") { retreat() }
+            }
+            browseButton
+            Button(step == .libraries ? "button.finish" : "button.next") { advance() }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
         }
-        .frame(width: 540, height: 460)
         .task {
             refreshGPTK()
             refreshLibraries()
@@ -105,42 +124,6 @@ struct BottleSetupRecommendationSheet: View {
         }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Step \(step.rawValue + 1) of \(BottleSetupStep.allCases.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(step.title)
-                .font(.title2)
-                .fontWeight(.bold)
-            ProgressView(
-                value: Double(step.rawValue + 1),
-                total: Double(BottleSetupStep.allCases.count)
-            )
-            .padding(.top, 2)
-        }
-        .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var footer: some View {
-        HStack {
-            Text("Set \(bottle.settings.name) up now, or do any of it later in Bottle Configuration.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .lineLimit(2)
-            Spacer(minLength: 12)
-            if step != .metal {
-                Button("Back") { retreat() }
-            }
-            browseButton
-            Button(step == .libraries ? "Finish" : "Next") { advance() }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-        }
-        .padding(18)
-    }
-
     /// The optional action for the current step. Only two steps have one, and
     /// neither is required to move on, so it sits beside Next rather than
     /// replacing it.
@@ -149,21 +132,15 @@ struct BottleSetupRecommendationSheet: View {
         switch step {
         case .metal:
             if gptkRecord == nil {
-                Button("Choose GPTK\u{2026}") { isBrowsingGPTK = true }
+                Button("setup.bottle.chooseGPTK") { isBrowsingGPTK = true }
             }
         case .runtimes:
             EmptyView()
         case .libraries:
             if !librariesSupplied {
-                Button("Choose Folder\u{2026}") { isBrowsingLibraries = true }
+                Button("setup.bottle.chooseFolder") { isBrowsingLibraries = true }
             }
         }
-    }
-
-    private func prominent(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.borderedProminent)
-            .keyboardShortcut(.defaultAction)
     }
 
     // MARK: - Navigation

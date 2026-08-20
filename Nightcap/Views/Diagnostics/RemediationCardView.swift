@@ -169,8 +169,17 @@ extension RemediationCardView {
 // MARK: - Action Button
 
 extension RemediationCardView {
+    /// No handler, no button: an Apply that ends in `onAction?(action)` with a
+    /// nil handler looks actionable and silently is not.
     @ViewBuilder
     private var actionButton: some View {
+        if onAction != nil {
+            actionButtonBody
+        }
+    }
+
+    @ViewBuilder
+    private var actionButtonBody: some View {
         switch action.actionType {
         case .changeSetting:
             if action.risk == .low {

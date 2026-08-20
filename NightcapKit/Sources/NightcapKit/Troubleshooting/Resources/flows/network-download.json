@@ -91,7 +91,7 @@
       },
       "on": {
         "pass": "check_wine_dns",
-        "fail": "fix_network_env",
+        "fail": "check_wine_dns",
         "already_configured": "check_wine_dns",
         "unknown": "check_wine_dns",
         "error": "check_wine_dns"
@@ -99,20 +99,6 @@
       "evidenceMap": {
         "issueVar": "Variable",
         "currentValue": "Current value"
-      }
-    },
-    "fix_network_env": {
-      "id": "fix_network_env",
-      "type": "fix",
-      "phase": "fix",
-      "title": "Fix network environment",
-      "description": "Correcting network-related environment variables that may be interfering with connectivity.",
-      "fixId": "fix-env-var",
-      "isReversible": true,
-      "requiresConfirmation": false,
-      "on": {
-        "applied": "verify_fix",
-        "skipped": "check_wine_dns"
       }
     },
     "check_wine_dns": {
@@ -128,7 +114,7 @@
       },
       "on": {
         "pass": "escalate",
-        "fail": "fix_wine_dns",
+        "fail": "escalate",
         "already_configured": "escalate",
         "unknown": "escalate",
         "error": "escalate"
@@ -136,20 +122,6 @@
       "evidenceMap": {
         "currentValue": "Current DNS",
         "expectedValue": "Expected value"
-      }
-    },
-    "fix_wine_dns": {
-      "id": "fix_wine_dns",
-      "type": "fix",
-      "phase": "fix",
-      "title": "Fix Wine DNS configuration",
-      "description": "Correcting the Wine DNS registry settings to use system DNS resolution.",
-      "fixId": "set-registry-value",
-      "isReversible": true,
-      "requiresConfirmation": false,
-      "on": {
-        "applied": "verify_fix",
-        "skipped": "escalate"
       }
     },
     "verify_fix": {
@@ -160,7 +132,7 @@
       "description": "Try the download or connection again to check whether the issue is resolved.",
       "on": {
         "yes": "resolved",
-        "no": "check_general_network"
+        "no": "escalate"
       }
     },
     "escalate": {

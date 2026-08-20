@@ -34,6 +34,7 @@ struct FixPreviewView: View {
     @State private var fixPreview: FixPreview?
     @State private var showConfirmation: Bool = false
     @State private var isApplying: Bool = false
+    @State private var applyError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -175,6 +176,7 @@ extension FixPreviewView {
 // MARK: - Action Buttons
 
 extension FixPreviewView {
+    @ViewBuilder
     private var actionButtons: some View {
         HStack {
             Button("Skip for now") {
@@ -200,6 +202,11 @@ extension FixPreviewView {
             }
             .buttonStyle(.borderedProminent)
             .disabled(isApplying)
+        }
+        if let applyError {
+            Label(applyError, systemImage: "xmark.circle")
+                .font(.caption)
+                .foregroundStyle(.red)
         }
     }
 
@@ -229,20 +236,77 @@ extension FixPreviewView {
     private func applyFix() {
         guard let fixId = node.fixId else { return }
         isApplying = true
+        applyError = nil
 
-        let attempt = FixApplicator.apply(
-            fixId: fixId,
-            params: node.params ?? [:],
-            bottle: bottle,
-            program: program
-        )
-        engine.applyFix(
-            fixId: fixId,
-            beforeValue: attempt.beforeValue,
-            afterValue: attempt.afterValue
-        )
-        engine.confirmFixApplied(fixId: fixId)
+        Task {
+            // The restart fix used to fire-and-forget the kill and report
+            // "restarted" while the server was still up; wait for it first so
+            // the verify step sees the truth.
+            if fixId == "restart-wineserver" {
+                await Wine.killBottleAndWait(bottle: bottle)
+            }
 
-        isApplying = false
+            let attempt = FixApplicator.apply(
+                fixId: fixId,
+                params: node.params ?? [:],
+                bottle: bottle,
+                program: program
+            )
+
+            // `.pending` means the applicator changed nothing itself. For the
+            // install fixes that used to be the whole story — the comment said
+            // "delegated to the Winetricks infrastructure" and no delegation
+            // existed, so the history recorded installs that never ran.
+            var outcome = attempt.result
+            if outcome == .pending {
+                outcome = await runPendingWork(fixId: fixId)
+            }
+
+            engine.applyFix(
+                fixId: fixId,
+                beforeValue: attempt.beforeValue,
+                afterValue: attempt.afterValue
+            )
+            // The result used to be discarded here, so a failed apply was
+            // recorded as applied and the flow moved on satisfied.
+            if outcome == .failed {
+                applyError = String(localized: "troubleshooting.fix.failed")
+            } else {
+                engine.confirmFixApplied(fixId: fixId)
+            }
+            isApplying = false
+        }
+    }
+
+    /// Runs the async work behind a `.pending` attempt and reports how it went.
+    private func runPendingWork(fixId: String) async -> FixResult {
+        switch fixId {
+        case "install-winetricks-verb", "install-dependency":
+            let verbs = pendingVerbs(for: fixId)
+            guard !verbs.isEmpty else { return .failed }
+            var failed = false
+            for await (_, progress) in Winetricks.installVerbs(verbs, for: bottle) {
+                switch progress {
+                case let .completed(exitCode) where exitCode != 0: failed = true
+                case .failed, .timedOut: failed = true
+                default: break
+                }
+            }
+            return failed ? .failed : .applied
+        default:
+            // Settings-only pendings (e.g. the buffer preset) took effect when
+            // the setting was written; nothing further to run.
+            return .applied
+        }
+    }
+
+    private func pendingVerbs(for fixId: String) -> [String] {
+        let params = node.params ?? [:]
+        if fixId == "install-winetricks-verb" {
+            return params["verb"].map { [$0] } ?? []
+        }
+        let id = params["dependency"] ?? ""
+        return DependencyDefinition.standardDependencies
+            .first { $0.id == id }?.winetricksVerbs ?? []
     }
 }

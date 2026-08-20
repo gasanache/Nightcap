@@ -22,6 +22,8 @@ import SwiftUI
 /// A sheet that shows a before/after diff of what settings will change when
 /// applying a game configuration variant, with winetricks preflight and apply action.
 struct GameConfigPreviewSheet: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     let entry: GameDBEntry
     let variant: GameConfigVariant
     @ObservedObject var bottle: Bottle
@@ -41,8 +43,6 @@ struct GameConfigPreviewSheet: View {
     @State private var missingDependency: DependencyDefinition?
     /// Non-nil only while the install sheet is up, which is what presents it.
     @State private var installing: DependencyDefinition?
-    @AppStorage("gameConfigSkipPreview") private var skipPreview: Bool = false
-    @Binding var toast: ToastData?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,13 +60,15 @@ struct GameConfigPreviewSheet: View {
             }
             sheetFooter
         }
-        .frame(minWidth: 480, idealWidth: 520, minHeight: 400, idealHeight: 600)
+        // idealHeight 600 presented the sheet taller than most windows — and
+        // taller than the 500pt detail sheet it stacks on — clipping Cancel
+        // and Apply out of reach.
+        .frame(minWidth: 480, idealWidth: 520, minHeight: 400, idealHeight: 480)
         .task {
             await loadPreviewData()
         }
         .sheet(item: $installing, onDismiss: finishAfterInstall) { definition in
             DependencyInstallSheet(definition: definition, bottle: bottle)
-                .frame(minWidth: 500, minHeight: 400)
         }
     }
 }
@@ -213,10 +215,9 @@ extension GameConfigPreviewSheet {
 extension GameConfigPreviewSheet {
     private var sheetFooter: some View {
         HStack {
-            Toggle("gameConfig.preview.dontShowAgain", isOn: $skipPreview)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
+            // A "Don't show this again" toggle stood here, writing an
+            // AppStorage key that nothing anywhere read — ticked or not, the
+            // preview always appeared. Removed rather than left lying.
             Spacer()
 
             Button("gameConfig.preview.cancel", role: .cancel) {
@@ -330,9 +331,9 @@ extension GameConfigPreviewSheet {
 
     private func finish() {
         dismiss()
-        toast = ToastData(
-            message: String(localized: "gameConfig.apply.success \(entry.title)"),
-            style: .success
+        toastCentre.show(
+            String(localized: "gameConfig.apply.success \(entry.title)"),
+            status: .ready
         )
     }
 }

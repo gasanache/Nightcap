@@ -33,40 +33,91 @@ struct DependencyConfigSection: View {
     @State private var selectedDependency: DependencyDefinition?
 
     var body: some View {
-        Section {
-            if isLoading {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Checking installed dependencies\u{2026}")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                ForEach(statuses) { status in
-                    dependencyRow(status)
-                }
-            }
-        } header: {
-            HStack {
-                Label("Dependencies", systemImage: "shippingbox")
-                Spacer()
-                Button {
-                    loadDependencies()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.borderless)
-                .disabled(isLoading)
-                .help("Re-check all dependency statuses")
-            }
-        }
+        NCSection(
+            title: "dependency.section",
+            systemImage: "shippingbox",
+            accessory: { headerAccessory },
+            content: { sectionContent }
+        )
         .onAppear {
             loadDependencies()
         }
-        .sheet(item: $selectedDependency) { definition in
+        // Keyed on the bottle: switching bottles in the sidebar reuses this
+        // view, so `onAppear` alone would leave the previous bottle's answers
+        // on screen.
+        .onChange(of: bottle.url) {
+            loadDependencies()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .dependenciesChanged)) { note in
+            guard note.object as? URL == bottle.url else { return }
+            loadDependencies()
+        }
+        // Winetricks can also be run from the sheet that shells out to
+        // Terminal, and the app has no way to know when that finished. Coming
+        // back to Nightcap is the moment to look again. Cheap when nothing
+        // changed: the verb cache keys off the winetricks log's size and
+        // modification date, so an unchanged prefix is a cache hit.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            loadDependencies()
+        }
+        .sheet(item: $selectedDependency, onDismiss: loadDependencies) { definition in
             DependencyInstallSheet(definition: definition, bottle: bottle)
-                .frame(minWidth: 500, minHeight: 400)
+        }
+    }
+
+    // MARK: - Header
+
+    /// The refresh control, and — while a check is running — the fact that one
+    /// is running.
+    ///
+    /// The spinner used to stand where the rows were, so every refresh emptied
+    /// the section and the whole page reflowed under the cursor. The rows stay
+    /// put now; only this accessory changes.
+    private var headerAccessory: some View {
+        HStack(spacing: Theme.Space.snug) {
+            if isLoading {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel(Text("dependency.checking"))
+            }
+            Button {
+                loadDependencies()
+            } label: {
+                Label("dependency.refresh", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.borderless)
+            .disabled(isLoading)
+            .help("dependency.refresh.help")
+        }
+    }
+
+    // MARK: - Content
+
+    /// Only the very first check has no rows to keep, so only the first check
+    /// says anything in the body.
+    @ViewBuilder
+    private var sectionContent: some View {
+        if statuses.isEmpty {
+            if isLoading {
+                NCNotice(status: .running, message: String(localized: "dependency.checking"))
+            } else {
+                NCEmptyState(
+                    systemImage: "shippingbox",
+                    title: "dependency.empty.title",
+                    message: "dependency.empty.message"
+                ) {
+                    Button("dependency.refresh") {
+                        loadDependencies()
+                    }
+                }
+            }
+        } else {
+            ForEach(statuses) { status in
+                dependencyRow(status)
+            }
         }
     }
 
@@ -75,89 +126,68 @@ struct DependencyConfigSection: View {
     /// One dependency as a single row: what it is on the left, where it stands
     /// on the right.
     ///
-    /// The previous layout stacked a second line underneath carrying "Checked
-    /// N ago" on the left and a right-aligned "Details" heading above the verb
-    /// list, in a 200pt box. Three competing columns of tertiary text per row,
-    /// five rows deep, and the eye had nowhere to rest. The verbs and the check
-    /// time are the same kind of information — incidental detail — so they now
-    /// share one quiet caption line under the description.
+    /// This was `NCRow` rebuilt by hand, with its own spacings and its own
+    /// four-colour status vocabulary — green, red, yellow, grey — while the
+    /// next section down the same page painted "not present" orange. The badge
+    /// and the row are the shared ones now, so the two agree.
     private func dependencyRow(_ depStatus: DependencyStatus) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(depStatus.definition.displayName)
-                    .font(.system(.body, weight: .medium))
-                Text(depStatus.definition.description)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                caption(for: depStatus)
-            }
+        NCRow(
+            title: depStatus.definition.displayName,
+            caption: caption(for: depStatus),
+            machine: depStatus.definition.winetricksVerbs.joined(separator: ", ")
+        ) {
+            HStack(spacing: Theme.Space.snug) {
+                NCStatusBadge(
+                    status: NCStatus(depStatus.status),
+                    label: label(for: depStatus.status)
+                )
 
-            Spacer(minLength: 8)
-
-            statusBadge(depStatus.status)
-
-            if !isInstalled(depStatus.status) {
-                Button("Install") {
-                    selectedDependency = depStatus.definition
+                if !isInstalled(depStatus.status) {
+                    Button("dependency.install") {
+                        selectedDependency = depStatus.definition
+                    }
+                    .controlSize(.small)
                 }
-                .controlSize(.small)
             }
         }
-        .padding(.vertical, 6)
     }
 
-    /// Verbs, freshness and confidence on one line, in reading order.
-    private func caption(for depStatus: DependencyStatus) -> some View {
-        HStack(spacing: 6) {
-            Text(depStatus.definition.winetricksVerbs.joined(separator: ", "))
-                .font(.system(.caption2, design: .monospaced))
-                .textSelection(.enabled)
+    /// What the dependency is, how fresh the answer is, and how it was reached.
+    ///
+    /// The freshness used to be three `Text` values glued together with `+` —
+    /// "checked ", the date, " ago" — a sentence no translator could reorder.
+    /// It is one format key taking the relative date as its argument now.
+    private func caption(for depStatus: DependencyStatus) -> String {
+        var parts = [depStatus.definition.description]
 
-            if let lastChecked = depStatus.lastChecked {
-                Text("·")
-                Text("checked ") + Text(lastChecked, style: .relative) + Text(" ago")
-            }
-
-            // Only worth saying when the answer is not a fresh direct check.
-            if depStatus.confidence == .cached || depStatus.confidence == .heuristic {
-                Text("·")
-                Text(depStatus.confidence.rawValue)
-            }
+        if let lastChecked = depStatus.lastChecked {
+            let relative = lastChecked.formatted(.relative(presentation: .named))
+            parts.append(String(localized: "dependency.lastChecked \(relative)"))
         }
-        .font(.caption2)
-        .foregroundStyle(.tertiary)
-        .lineLimit(1)
-    }
 
-    // MARK: - Status Badge
-
-    @ViewBuilder
-    private func statusBadge(_ status: DependencyInstallStatus) -> some View {
-        switch status {
-        case .installed:
-            Label("Installed", systemImage: "checkmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
-        case .notInstalled:
-            Label("Not Installed", systemImage: "xmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
-        case .partiallyInstalled:
-            Label("Partially Installed", systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.yellow)
-        case .unknown:
-            Label("Unknown", systemImage: "questionmark.circle.fill")
-                .font(.caption)
-                .foregroundStyle(.gray)
+        // Only worth saying when the answer is not a fresh direct check.
+        if depStatus.confidence == .cached || depStatus.confidence == .heuristic {
+            parts.append(depStatus.confidence.rawValue)
         }
+
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Helpers
 
+    private func label(for status: DependencyInstallStatus) -> LocalizedStringKey {
+        switch status {
+        case .installed: "dependency.installed"
+        case .notInstalled: "dependency.notInstalled"
+        case .partiallyInstalled: "dependency.partial"
+        case .unknown: "dependency.unknown"
+        }
+    }
+
     private func isInstalled(_ status: DependencyInstallStatus) -> Bool {
-        if case .installed = status { return true }
+        if case .installed = status {
+            return true
+        }
         return false
     }
 

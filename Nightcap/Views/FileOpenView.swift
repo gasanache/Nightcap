@@ -23,10 +23,11 @@ import SwiftUI
 private let logger = Logger(subsystem: Bundle.nightcapBundleIdentifier, category: "FileOpenView")
 
 struct FileOpenView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     var fileURL: URL
     var currentBottle: URL?
     var bottles: [Bottle]
-    @Binding var toast: ToastData?
 
     @State private var selection: URL = .init(filePath: "")
     @Environment(\.dismiss) private var dismiss
@@ -95,6 +96,14 @@ struct FileOpenView: View {
                             url: fileURL,
                             bottle: bottle
                         )
+                    } else if let program = await MainActor.run(body: {
+                        bottle.programs.first(where: { $0.url == fileURL })
+                    }) {
+                        // A registered program launched through Open With used
+                        // to go through the bare path, silently ignoring its
+                        // saved arguments, environment and overrides — the only
+                        // launch surface that did.
+                        _ = await program.launchWithUserMode(useTerminal: false)
                     } else {
                         try await Wine.runProgram(at: fileURL, bottle: bottle)
                     }
@@ -109,10 +118,9 @@ struct FileOpenView: View {
                     )
                     await MainActor.run {
                         withAnimation {
-                            toast = ToastData(
-                                message: String(localized: "status.launchFailed \(errDesc)"),
-                                style: .error,
-                                autoDismiss: false
+                            toastCentre.show(
+                                String(localized: "status.launchFailed \(errDesc)"),
+                                status: .failed, persistent: true
                             )
                         }
                     }

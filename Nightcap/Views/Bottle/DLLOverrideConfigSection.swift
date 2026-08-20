@@ -27,7 +27,9 @@ struct DLLOverrideConfigSection: View {
     @ObservedObject var bottle: Bottle
 
     var body: some View {
-        Section("config.title.dllOverrides") {
+        // A real header rather than a bare `Section(_:)` string, so this
+        // section is introduced the same way as the ones above and below it.
+        NCSection(title: "config.title.dllOverrides", systemImage: "puzzlepiece.extension") {
             DLLOverrideEditor(
                 managedOverrides: computedManagedOverrides,
                 customOverrides: $bottle.settings.dllOverrides,

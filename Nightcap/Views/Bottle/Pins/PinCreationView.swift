@@ -102,6 +102,10 @@ struct PinCreationView: View {
     }
 
     func submit() {
+        // Mirror the button's own disabled condition; Return used to create a
+        // pin with an empty title.
+        guard !newPinName.isEmpty, newPinURL != nil else { return }
+
         guard let newPinURL else { return }
 
         // Ensure this pin doesn't already exist

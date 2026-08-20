@@ -35,7 +35,6 @@ struct TroubleshootingWizardView: View {
     @State private var showResumeOverlay: Bool = false
     @State private var resumeSession: TroubleshootingSession?
     @State private var stalenessChanges: [StalenessChange] = []
-    @State private var showConfirmationSubSheet: Bool = false
 
     private let sessionStore = TroubleshootingSessionStore()
 
@@ -67,7 +66,9 @@ struct TroubleshootingWizardView: View {
                 )
             }
         }
-        .frame(minWidth: 700, minHeight: 500)
+        // 700 exceeded the main window's own 600 minimum, so at narrow widths
+        // the sheet was wider than its host.
+        .frame(minWidth: ViewWidth.large, minHeight: ViewHeight.large)
         .onAppear(perform: onAppear)
     }
 }
@@ -249,13 +250,18 @@ extension TroubleshootingWizardView {
 
 extension TroubleshootingWizardView {
     private func onAppear() {
+        Task { await configureSession() }
+    }
+
+    @MainActor
+    private func configureSession() async {
         // Configure session with bottle/program context
         engine.session.bottleURL = entryContext.bottleURL
         engine.session.programURL = entryContext.programURL
 
         // Check for existing active session
         if let existingSession = sessionStore.loadActiveSession(for: entryContext.bottleURL) {
-            let currentPreflight = collectPreflight()
+            let currentPreflight = await collectPreflight()
             stalenessChanges = sessionStore.checkStaleness(
                 session: existingSession,
                 currentPreflight: currentPreflight
@@ -264,7 +270,7 @@ extension TroubleshootingWizardView {
             showResumeOverlay = true
         } else {
             // Collect preflight and populate session
-            let preflight = collectPreflight()
+            let preflight = await collectPreflight()
             engine.session.preflightSnapshot = preflight
             engine.session.phase = entryContext.initialPhase
 
@@ -278,14 +284,18 @@ extension TroubleshootingWizardView {
         }
     }
 
-    private func collectPreflight() -> PreflightData {
-        PreflightData(
+    /// Real values, not placeholders: this snapshot is what the resume-time
+    /// staleness check diffs against, and with both sides hardcoded to
+    /// `false`/`0` the wineserver and process-count comparisons could never
+    /// report a change.
+    private func collectPreflight() async -> PreflightData {
+        await PreflightData(
             bottleURL: entryContext.bottleURL,
             bottleName: bottle.settings.name,
             programURL: entryContext.programURL,
             programName: program?.name,
-            isWineserverRunning: false,
-            processCount: 0,
+            isWineserverRunning: Wine.isWineserverRunning(for: bottle),
+            processCount: ProcessRegistry.shared.getProcessCount(for: bottle),
             graphicsBackend: bottle.settings.graphicsBackend.rawValue
         )
     }

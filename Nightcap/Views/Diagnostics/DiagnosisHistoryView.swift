@@ -48,6 +48,13 @@ struct DiagnosisHistoryView: View {
         }
         .onAppear {
             loadHistory()
+        }
+        // An analyze run elsewhere writes new entries while this list stays
+        // mounted; re-read when the app comes back to front.
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSApplication.didBecomeActiveNotification
+        )) { _ in
+            loadHistory()
             selectedPreset = program.settings.activeWineDebugPreset ?? .normal
         }
     }

@@ -19,7 +19,7 @@
 import NightcapKit
 import SwiftUI
 
-/// Lets the user import bottles created by the archived original Nightcap app, which this
+/// Lets the user import bottles created by the archived Whisky app, which this
 /// fork doesn't see automatically because it uses a different bundle identifier. Bottles
 /// are referenced in place (not copied), so the import is non-destructive.
 struct MigrateBottlesSheet: View {
@@ -59,11 +59,11 @@ struct MigrateBottlesSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Import Bottles from the Original Nightcap")
+            Text("migrate.title")
                 .font(.headline)
             Text(
                 """
-                These bottles were created by the archived original Nightcap app. Importing references \
+                These bottles were created by the archived Whisky app. Importing references \
                 them in place — your files aren't moved or copied, and the original app keeps working.
                 """
             )
@@ -81,7 +81,7 @@ struct MigrateBottlesSheet: View {
                 Image(systemName: "tray")
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
-                Text("No bottles from the original Nightcap were found.")
+                Text("migrate.none")
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

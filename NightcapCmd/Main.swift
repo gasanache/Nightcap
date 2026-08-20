@@ -53,7 +53,6 @@ struct Nightcap: AsyncParsableCommand {
             List.self,
             Create.self,
             Add.self,
-//                      Export.self,
             Delete.self,
             Remove.self,
             Run.self,
@@ -61,8 +60,6 @@ struct Nightcap: AsyncParsableCommand {
             Launch.self,
             Shortcut.self,
             Shellenv.self
-            /* Install.self,
-             Uninstall.self */
         ]
     )
 }
@@ -139,14 +136,6 @@ extension Nightcap {
             var bottlesList = BottleData()
             bottlesList.paths.append(bottleURL)
             print("Bottle \"\(settings.name)\" added.")
-        }
-    }
-
-    struct Export: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Export an existing bottle.")
-
-        mutating func run() throws {
-//            print("Create a bottle")
         }
     }
 
@@ -484,20 +473,6 @@ extension Nightcap {
             let envCmd = Wine.generateTerminalEnvironmentCommand(bottle: bottle)
             print(envCmd)
         }
-    }
-
-    struct Install: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Install NightcapWine.")
-
-        mutating func run() throws {}
-    }
-
-    struct Uninstall: ParsableCommand {
-        static let configuration = CommandConfiguration(abstract: "Uninstall NightcapWine.")
-
-        @Flag(name: [.long, .short], help: "Uninstall NightcapWine") var nightcapWine = false
-
-        mutating func run() throws {}
     }
 }
 

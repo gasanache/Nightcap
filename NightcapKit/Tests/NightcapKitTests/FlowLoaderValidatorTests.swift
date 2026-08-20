@@ -35,16 +35,12 @@ final class FlowLoaderValidatorTests: XCTestCase {
         // which by design has no flow: selecting it escalates directly to the
         // export fragment (the engine's no-flow path).
         let indexedFiles = Set(index.categories.map(\.flowFile))
-        for category in SymptomCategory.allCases where category != .other {
+        for category in SymptomCategory.allCases {
             XCTAssertTrue(
                 indexedFiles.contains(category.flowFileName),
                 "index.json is missing \(category.flowFileName) for category \(category)"
             )
         }
-        XCTAssertFalse(
-            indexedFiles.contains(SymptomCategory.other.flowFileName),
-            ".other gained a flow file — update the engine's no-flow escalation expectations"
-        )
     }
 
     func testAllIndexedFlowsLoad() throws {

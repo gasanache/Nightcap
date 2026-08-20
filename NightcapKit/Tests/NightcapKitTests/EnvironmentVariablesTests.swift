@@ -236,7 +236,7 @@ final class EnvironmentVariablesTests: XCTestCase {
         XCTAssertEqual(env["D3DM_VALIDATION"], "0")
         XCTAssertEqual(env["MTL_DEBUG_LAYER"], "0")
         XCTAssertEqual(env["DXVK_ASYNC"], "1")
-        XCTAssertEqual(env["DXVK_SHADER_OPT_LEVEL"], "0")
+        XCTAssertNil(env["DXVK_SHADER_OPT_LEVEL"], "Removed: the shipped DXVK reads dxvk.conf, not this variable")
         XCTAssertEqual(env["MTL_ENABLE_METAL_EVENTS"], "0")
     }
 
@@ -248,7 +248,7 @@ final class EnvironmentVariablesTests: XCTestCase {
         var env: [String: String] = [:]
         settings.environmentVariables(wineEnv: &env)
 
-        XCTAssertEqual(env["DXVK_SHADER_OPT_LEVEL"], "2")
+        XCTAssertNil(env["DXVK_SHADER_OPT_LEVEL"])
         XCTAssertEqual(env["D3DM_FAST_SHADER_COMPILE"], "0")
     }
 
@@ -264,9 +264,9 @@ final class EnvironmentVariablesTests: XCTestCase {
         XCTAssertEqual(env["MONO_THREADS_SUSPEND"], "1")
         XCTAssertEqual(env["WINE_LARGE_ADDRESS_AWARE"], "65536")
         XCTAssertEqual(env["D3DM_FORCE_D3D11"], "1")
-        XCTAssertEqual(env["WINE_HEAP_REUSE"], "0")
-        XCTAssertEqual(env["WINE_DISABLE_NTDLL_THREAD_REGS"], "1")
-        XCTAssertEqual(env["WINEPRELOADRESERVE"], "1")
+        XCTAssertNil(env["WINE_HEAP_REUSE"])
+        XCTAssertNil(env["WINE_DISABLE_NTDLL_THREAD_REGS"])
+        XCTAssertNil(env["WINEPRELOADRESERVE"])
     }
 
     // MARK: - D3D11 and Shader Cache
@@ -289,8 +289,8 @@ final class EnvironmentVariablesTests: XCTestCase {
         var env: [String: String] = [:]
         settings.environmentVariables(wineEnv: &env)
 
-        XCTAssertEqual(env["DXVK_SHADER_COMPILE_THREADS"], "1")
-        XCTAssertEqual(env["__GL_SHADER_DISK_CACHE"], "0")
+        XCTAssertNil(env["DXVK_SHADER_COMPILE_THREADS"])
+        XCTAssertNil(env["__GL_SHADER_DISK_CACHE"])
     }
 
     // MARK: - EnvironmentBuilder Layer Populator Tests

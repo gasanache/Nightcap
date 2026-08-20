@@ -127,7 +127,7 @@
       "checkId": "game.config_available",
       "params": {},
       "on": {
-        "pass": "suggest_game_config",
+        "pass": "escalate",
         "fail": "escalate",
         "unknown": "escalate",
         "error": "escalate"
@@ -135,20 +135,6 @@
       "evidenceMap": {
         "gameName": "Matched game",
         "confidence": "Match confidence"
-      }
-    },
-    "suggest_game_config": {
-      "id": "suggest_game_config",
-      "type": "fix",
-      "phase": "fix",
-      "title": "Apply recommended game configuration",
-      "description": "A known-good configuration exists for this program. Applying recommended graphics settings may resolve the issue.",
-      "fixId": "apply-game-config",
-      "isReversible": true,
-      "requiresConfirmation": true,
-      "on": {
-        "applied": "verify_fix",
-        "skipped": "escalate"
       }
     },
     "verify_fix": {

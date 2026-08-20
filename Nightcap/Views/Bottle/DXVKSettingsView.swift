@@ -36,33 +36,27 @@ struct DXVKSettingsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("config.dxvk.title")
-                    .font(.headline)
-                if !isDXVKActive {
-                    Text("config.dxvk.inactive")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.secondary.opacity(0.15), in: Capsule())
-                }
+        // A named group inside the Graphics section, not a heading that
+        // outranks it. The title was a `.headline`, one step *larger* than the
+        // section header above it, so the nesting read upside down.
+        NCSubsection(title: "config.dxvk.title") {
+            // The grey capsule said "not currently active" in the app's own
+            // private dialect of status. `.unknown` is the honest reading: DXVK
+            // is not the resolved backend, so nothing here is in force — and
+            // that is not a failure or something the user withheld.
+            if !isDXVKActive {
+                NCStatusBadge(status: .unknown, label: "config.dxvk.inactive")
             }
 
-            // DXVK Async toggle
-            Toggle(isOn: $bottle.settings.dxvkAsync) {
-                VStack(alignment: .leading) {
-                    Text("config.dxvk.async")
-                    Text("config.dxvk.async.info")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            NCToggleRow(
+                title: "config.dxvk.async",
+                isOn: $bottle.settings.dxvkAsync,
+                caption: "config.dxvk.async.info"
+            )
             .disabled(!isDXVKActive)
 
             // DXVK HUD preset picker
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: Theme.Space.tight) {
                 Picker("config.dxvkHud", selection: $bottle.settings.dxvkHud) {
                     Text("config.dxvkHud.off").tag(DXVKHUD.off)
                     Text("config.dxvkHud.fps").tag(DXVKHUD.fps)
@@ -70,8 +64,9 @@ struct DXVKSettingsView: View {
                     Text("config.dxvkHud.full").tag(DXVKHUD.full)
                 }
                 Text("config.dxvkHud.info")
-                    .font(.caption)
+                    .font(Theme.Typography.rowCaption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .disabled(!isDXVKActive)
@@ -84,21 +79,21 @@ struct DXVKSettingsView: View {
     // MARK: - dxvk.conf Management
 
     private var dxvkConfManagement: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: Theme.Space.snug) {
             Divider()
-            HStack {
-                Text("config.dxvk.confFile")
-                    .font(.subheadline)
-                Spacer()
-                Text(
-                    confExists
-                        ? confURL.lastPathComponent
-                        : String(localized: "config.dxvk.confNotFound")
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // The row's subject is a filename, so it takes the monospaced
+            // title slot rather than being set in prose. The right-hand side
+            // used to repeat the same filename back — `confURL` is always
+            // `dxvk.conf` — so only the "not found" half of that pair carried
+            // anything, and it is the caption now.
+            NCRow(
+                title: String(localized: "config.dxvk.confFile"),
+                caption: confExists ? nil : String(localized: "config.dxvk.confNotFound"),
+                isMachineTitle: true
+            ) {
+                EmptyView()
             }
-            HStack(spacing: 8) {
+            HStack(spacing: Theme.Space.snug) {
                 Button("config.dxvk.openInEditor") {
                     if !confExists {
                         createDefaultConf()
@@ -115,7 +110,7 @@ struct DXVKSettingsView: View {
                 }
                 .disabled(!confExists)
             }
-            .font(.caption)
+            .font(Theme.Typography.rowCaption)
         }
         .disabled(!isDXVKActive)
         .onAppear {

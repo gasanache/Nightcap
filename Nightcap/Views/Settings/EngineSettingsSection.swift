@@ -37,6 +37,8 @@ extension Notification.Name {
 /// Apple's D3DMetal. Before this, taking the second one meant installing a
 /// runtime by hand, because the manifest only ever named the first.
 struct EngineSettingsSection: View {
+    @Environment(\.openWindow) private var openWindow
+
     @State private var engines: [NightcapWineVersion] = []
     @State private var installed: NightcapWineVersion?
     @State private var loadFailure: String?
@@ -45,15 +47,16 @@ struct EngineSettingsSection: View {
     var body: some View {
         Section {
             if isLoading {
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Space.snug) {
                     ProgressView().controlSize(.small)
-                    Text("Checking available engines\u{2026}")
+                    Text("settings.engine.checking")
                         .foregroundStyle(.secondary)
                 }
             } else if let loadFailure {
-                Label(loadFailure, systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // `.unknown` rather than `.failed`: being offline is the common
+                // way to land here, it is not the user's doing, and a red banner
+                // would say the engine list is broken when it is only unread.
+                NCNotice(status: .unknown, message: loadFailure)
             } else {
                 // Keyed on the archive, not the tag: every engine now ships
                 // from the same release, so the tag stopped being unique and
@@ -63,15 +66,11 @@ struct EngineSettingsSection: View {
                 }
             }
         } header: {
-            Text("Wine engine")
+            Text("settings.engine")
         } footer: {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Changing engine replaces the installed runtime. Bottles, imported payloads and "
-                    + "supplied libraries are kept — they live outside it.")
-                metalChecklist
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            Text("settings.engine.footer")
+                .font(Theme.Typography.rowCaption)
+                .foregroundStyle(.secondary)
         }
         .task { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .runtimeChanged)) { _ in
@@ -79,77 +78,58 @@ struct EngineSettingsSection: View {
         }
     }
 
-    /// Metal takes two separate pieces and each screen only knows its own half,
-    /// so having one without the other reads as broken. This is the one place
-    /// that says what is still missing.
-    @ViewBuilder
-    private var metalChecklist: some View {
-        let engineReady = installed?.gptkCapable == true
-        let payloadReady = GPTKImporter.storedRecord() != nil
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Direct3D 12 on Metal needs both:")
-                .fontWeight(.medium)
-            checklistLine(done: engineReady, text: "The GPTK-capable engine, installed above")
-            checklistLine(done: payloadReady, text: "Apple's Game Porting Toolkit, imported below")
-            if engineReady, payloadReady {
-                Text("Both present — D3DMetal is selectable in Bottle Configuration.")
-            } else {
-                Text("Direct3D 11 titles reach Metal through DXMT on either engine, "
-                    + "and need neither of these.")
-            }
-        }
-    }
-
-    private func checklistLine(done: Bool, text: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(done ? Color.green : Color.secondary)
-            Text(text)
-        }
-    }
-
     private func row(for engine: NightcapWineVersion) -> some View {
         let isCurrent = installed?.version == engine.version
-        return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(engine.gptkCapable == true ? "GPTK-capable engine" : "Standard engine")
-                    .font(.system(.body, weight: .medium))
-                Text(describe(engine))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 8)
+        let isGPTK = engine.gptkCapable == true
+        let title: String.LocalizationValue = isGPTK
+            ? "settings.engine.gptk"
+            : "settings.engine.standard"
+        let caption: String.LocalizationValue = isGPTK
+            ? "settings.engine.gptk.caption"
+            : "settings.engine.standard.caption"
+        return NCRow(
+            title: String(localized: title),
+            caption: String(localized: caption),
+            machine: versionStamp(of: engine)
+        ) {
             if isCurrent {
-                Label("Installed", systemImage: "checkmark.circle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.green)
+                NCStatusBadge(status: .ready, label: "settings.engine.installed")
             } else {
-                Button("Install") {
-                    NotificationCenter.default.post(
-                        name: .installEngineRequested,
-                        object: engine.version
-                    )
+                NCStatusBadge(status: .available, label: "settings.engine.available")
+                Button("settings.engine.install") {
+                    // The observer lives on the main window's content view. In
+                    // menu-bar-only mode that window may not exist, so the post
+                    // went into the void; open it first and give it a beat to
+                    // mount before posting.
+                    openWindow(id: NightcapApp.mainWindowID)
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(300))
+                        NotificationCenter.default.post(
+                            name: .installEngineRequested,
+                            object: engine.version
+                        )
+                    }
                 }
                 .controlSize(.small)
             }
         }
-        .padding(.vertical, 4)
     }
 
-    /// What taking this engine actually gets you, rather than a version alone.
+    /// The version numbers alone, for the row's machine slot.
     ///
     /// The number is the runtime package's, not Wine's — runtime 3.1.1 carries
     /// Wine 11 — so it is labelled as such rather than reading as a Wine
-    /// version that would be years out of date.
-    private func describe(_ engine: NightcapWineVersion) -> String {
-        var parts = ["Runtime \(engine.version.major).\(engine.version.minor).\(engine.version.patch)"]
-        if engine.gptkCapable == true {
-            parts.append("older Wine, runs D3DMetal with your own GPTK import")
-        } else {
-            parts.append("newer Wine, no D3DMetal")
-        }
+    /// version that would be years out of date. What the engine trades away is
+    /// prose and stays in the caption; welding the two together with a middle
+    /// dot made a sentence that was half stamp and half explanation.
+    private func versionStamp(of engine: NightcapWineVersion) -> String {
+        let version = engine.version
+        var parts = [String(
+            format: String(localized: "settings.engine.runtime %@"),
+            "\(version.major).\(version.minor).\(version.patch)"
+        )]
         if let dxmt = engine.dxmtVersion {
-            parts.append("DXMT \(dxmt)")
+            parts.append(String(format: String(localized: "settings.engine.dxmt %@"), dxmt))
         }
         return parts.joined(separator: " · ")
     }
@@ -159,7 +139,7 @@ struct EngineSettingsSection: View {
         installed = NightcapWineInstaller.nightcapWineInfo()
 
         guard let url = URL(string: DistributionConfig.versionPlistURL) else {
-            loadFailure = "Could not build the manifest address."
+            loadFailure = String(localized: "settings.engine.error.address")
             return
         }
         do {
@@ -169,7 +149,10 @@ struct EngineSettingsSection: View {
         } catch {
             // Offline is the common case here and not worth an alert; the
             // section simply says nothing is known rather than looking broken.
-            loadFailure = "Could not reach the engine list. \(error.localizedDescription)"
+            loadFailure = String(
+                format: String(localized: "settings.engine.error.unreachable %@"),
+                error.localizedDescription
+            )
         }
     }
 }

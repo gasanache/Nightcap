@@ -20,14 +20,15 @@ import NightcapKit
 import SwiftUI
 
 struct RunningProcessesView: View {
+    @Environment(NCToastCenter.self) private var toastCentre
+
     @ObservedObject var bottle: Bottle
     @StateObject private var viewModel: ProcessesViewModel
-    @State private var toast: ToastData?
     @State private var showStopConfirmation: Bool = false
     @State private var showForceStopConfirmation: Bool = false
     @State private var showingDetail: Bool = false
-    // Not private: the frame-rate bar lives in its own file to keep this one
-    // inside the file-length limit.
+    /// Not private: the frame-rate bar lives in its own file to keep this one
+    /// inside the file-length limit.
     @StateObject var frameRate = FrameRateMonitor()
 
     init(bottle: Bottle) {
@@ -40,7 +41,7 @@ struct RunningProcessesView: View {
             if viewModel.filteredProcesses.isEmpty, viewModel.shutdownState == .idle {
                 emptyStateView
             } else {
-                processTableView
+                processListView
             }
             if viewModel.shutdownState != .idle {
                 shutdownOverlay
@@ -49,7 +50,6 @@ struct RunningProcessesView: View {
         .navigationTitle("tab.processes")
         .safeAreaInset(edge: .top) { frameRateBar }
         .toolbar { processToolbar }
-        .toast($toast)
         .onAppear {
             viewModel.startPolling()
             frameRate.start()
@@ -80,22 +80,30 @@ struct RunningProcessesView: View {
 
     // MARK: - Empty State
 
+    /// Two different absences. While the poll is in flight the screen is
+    /// waiting, and a spinner says so better than a glyph; once it has looked
+    /// and found nothing, it is an empty state with the one way out on it.
+    @ViewBuilder
     private var emptyStateView: some View {
-        VStack(spacing: 12) {
-            if viewModel.isPolling {
+        if viewModel.isPolling {
+            VStack(spacing: Theme.Space.row) {
                 ProgressView()
                     .controlSize(.small)
                 Text("process.checking")
                     .foregroundStyle(.secondary)
-            } else {
-                Text("process.empty")
-                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            NCEmptyState(
+                systemImage: "cpu",
+                title: "process.empty",
+                message: "process.empty.message"
+            ) {
                 Button("process.action.refresh") {
                     Task { await viewModel.refreshProcessList() }
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Shutdown Overlay
@@ -128,9 +136,9 @@ struct RunningProcessesView: View {
             Task {
                 let count = await viewModel.stopBottle()
                 withAnimation {
-                    toast = ToastData(
-                        message: String(localized: "process.toast.stopped \(count)"),
-                        style: .success
+                    toastCentre.show(
+                        String(localized: "process.toast.stopped \(count)"),
+                        status: .ready
                     )
                 }
             }
@@ -156,9 +164,9 @@ struct RunningProcessesView: View {
             Task {
                 let count = await viewModel.forceStopBottle()
                 withAnimation {
-                    toast = ToastData(
-                        message: String(localized: "process.toast.stopped \(count)"),
-                        style: .success
+                    toastCentre.show(
+                        String(localized: "process.toast.stopped \(count)"),
+                        status: .ready
                     )
                 }
             }
@@ -167,49 +175,13 @@ struct RunningProcessesView: View {
     }
 }
 
-// MARK: - Process Table & Detail
+// MARK: - Process List & Detail
 
 extension RunningProcessesView {
-    var processTableView: some View {
+    var processListView: some View {
         VStack(spacing: 0) {
-            Table(viewModel.filteredProcesses, selection: $viewModel.selectedProcessID) {
-                TableColumn(String(localized: "process.column.name")) { process in
-                    Text(process.imageName)
-                }
-                .width(min: 120, ideal: 180)
-
-                TableColumn(String(localized: "process.column.pid")) { process in
-                    Text(String(process.winePID))
-                        .monospacedDigit()
-                }
-                .width(min: 50, ideal: 60)
-
-                TableColumn(String(localized: "process.column.memory")) { process in
-                    Text(process.memoryUsage)
-                        .monospacedDigit()
-                }
-                .width(min: 60, ideal: 80)
-
-                TableColumn(String(localized: "process.column.started")) { process in
-                    if let launchTime = process.launchTime {
-                        Text(launchTime, style: .relative)
-                    } else {
-                        Text("process.column.started.unknown")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .width(min: 70, ideal: 90)
-
-                TableColumn(String(localized: "process.column.kind")) { process in
-                    Text(localizedKind(process.kind))
-                }
-                .width(min: 50, ideal: 60)
-
-                TableColumn(String(localized: "process.column.source")) { process in
-                    Text(localizedSource(process.source))
-                        .foregroundStyle(process.source == .untracked ? .orange : .primary)
-                }
-                .width(min: 60, ideal: 80)
+            List(viewModel.filteredProcesses, selection: $viewModel.selectedProcessID) { process in
+                processRow(process)
             }
             .contextMenu(forSelectionType: Int32.self) { selectedIDs in
                 if let processID = selectedIDs.first,
@@ -224,6 +196,59 @@ extension RunningProcessesView {
                let process = viewModel.filteredProcesses.first(where: { $0.id == selectedID }) {
                 processDetailView(for: process)
             }
+        }
+    }
+
+    /// One process, as a row rather than six columns.
+    ///
+    /// The image name is the subject and it is a filename, so it takes the
+    /// machine treatment rather than being set in prose; the PID and the memory
+    /// figure are values read back off `tasklist`, so they share the row's
+    /// machine slot. What remains — the kind, where the process came from, how
+    /// long it has been up — is what the row says about its subject.
+    func processRow(_ process: WineProcess) -> some View {
+        NCRow(
+            title: process.imageName,
+            caption: localizedKind(process.kind),
+            machine: machineDetail(for: process),
+            isMachineTitle: true
+        ) {
+            HStack(spacing: Theme.Space.row) {
+                sourceLabel(for: process)
+                startedLabel(for: process)
+                // A process in this list is, by definition, up. The adapter is
+                // still where that becomes a colour, so the badge agrees with
+                // every other status in the app.
+                NCStatusBadge(
+                    status: NCStatus(exitCode: nil, isRunning: true),
+                    label: "process.status.running"
+                )
+            }
+        }
+    }
+
+    func machineDetail(for process: WineProcess) -> String {
+        let pidLabel = String(localized: "process.column.pid")
+        return "\(pidLabel) \(process.winePID) · \(process.memoryUsage)"
+    }
+
+    /// Untracked stays orange: it is the one thing in the row that says
+    /// Nightcap did not start this and cannot vouch for what stopping it does.
+    func sourceLabel(for process: WineProcess) -> some View {
+        Text(localizedSource(process.source))
+            .font(Theme.Typography.detail)
+            .foregroundStyle(process.source == .untracked ? Color.orange : Color.secondary)
+    }
+
+    /// Untracked processes have no launch time — the column used to fill that
+    /// gap with a dash, which a row does not need.
+    @ViewBuilder
+    func startedLabel(for process: WineProcess) -> some View {
+        if let launchTime = process.launchTime {
+            Text(launchTime, style: .relative)
+                .font(Theme.Typography.detail)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
     }
 
@@ -274,7 +299,7 @@ extension RunningProcessesView {
                     detailRow(label: "process.detail.source", value: localizedSource(process.source))
                     detailRow(label: "process.detail.kind", value: localizedKind(process.kind))
                     if let commandLine = process.commandLine {
-                        detailRow(label: "process.column.name", value: commandLine)
+                        detailRow(label: "process.column.command", value: commandLine)
                     }
                 }
                 Spacer()

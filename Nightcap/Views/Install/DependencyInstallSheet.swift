@@ -1,4 +1,3 @@
-// swiftlint:disable file_length
 //
 //  DependencyInstallSheet.swift
 //  Nightcap
@@ -20,43 +19,96 @@
 import NightcapKit
 import SwiftUI
 
-/// Guided dependency install sheet with 5 stages: Info, Preflight, Plan, Running, Verify.
+/// Posted once an install has finished and been verified, carrying the bottle
+/// URL. Anything showing dependency state reloads on it: the list that opened
+/// this sheet stays mounted behind it, so its `onAppear` never fires again and
+/// it would otherwise keep showing what it read before the install.
+extension Notification.Name {
+    static let dependenciesChanged = Notification.Name("dependenciesChanged")
+}
+
+/// Guided dependency install: what you are getting, whether the prefix can take
+/// it, the install itself, and what actually landed. Installation never happens
+/// silently — the user must explicitly click Install.
 ///
-/// Walks the user through what will be installed, checks prefix health,
-/// shows the verb list, streams live log output during installation, and
-/// re-verifies the dependency status after completion. Installation never
-/// happens silently -- the user must explicitly click Install.
+/// Each of the four stages wrote its own `.title2` semibold heading inside a
+/// sheet that had no title of its own, so the sheet was headed four different
+/// ways and nothing said which of the four you were on. The stage is now the
+/// title, with a step count and a progress bar above it.
 struct DependencyInstallSheet: View {
     let definition: DependencyDefinition
     @ObservedObject var bottle: Bottle
     @Environment(\.dismiss) private var dismiss
 
     @State private var stage: InstallStage = .info
-    @State private var logLines: [String] = []
-    @State private var isInstalling: Bool = false
-    @State private var installResult: InstallResult?
-    @State private var showLog: Bool = false
-    @State private var preflightResult: PreflightResult?
-    @State private var verifyStatus: DependencyInstallStatus?
+    // Not `private`: the four stage views live in
+    // DependencyInstallSheet+Stages.swift, and `private` does not cross a
+    // file boundary.
+    @State var logLines: [String] = []
+    @State var installResult: InstallResult?
+    @State var preflightResult: PreflightResult?
+    @State var verifyStatus: DependencyInstallStatus?
+    @State var transcriptPath: String?
 
     var body: some View {
-        VStack(spacing: 0) {
+        // Sized to fit the window, not the content's wishes: at 620pt this
+        // overhung a ~530pt host and was clipped, footer buttons first.
+        NCSheet(
+            title: stage.title,
+            width: ViewWidth.medium,
+            height: ViewHeight.medium,
+            eyebrow: stageEyebrow,
+            progress: stageProgress,
+            scrolls: stage != .running
+        ) {
             stageContent
-            Divider()
-            bottomBar
+        } footer: {
+            footerButtons
         }
-        .frame(minWidth: 500, minHeight: 400)
+    }
+
+    private var stageEyebrow: LocalizedStringKey {
+        "dependency.install.step \(stage.rawValue + 1) \(InstallStage.allCases.count)"
+    }
+
+    private var stageProgress: Double {
+        Double(stage.rawValue + 1) / Double(InstallStage.allCases.count)
+    }
+
+    private var stageContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.card) {
+            switch stage {
+            case .info:
+                infoStage
+            case .preflight:
+                preflightStage
+            case .running:
+                runningStage
+            case .verify:
+                verifyStage
+            }
+        }
     }
 }
 
 // MARK: - Install Stage
 
 extension DependencyInstallSheet {
-    enum InstallStage {
+    enum InstallStage: Int, CaseIterable {
         case info
         case preflight
         case running
         case verify
+
+        /// Four headings drawn inside the body; they are the one title now.
+        var title: LocalizedStringKey {
+            switch self {
+            case .info: "dependency.install.what"
+            case .preflight: "dependency.install.preflight"
+            case .running: "dependency.install.running"
+            case .verify: "dependency.install.verify"
+            }
+        }
     }
 
     enum InstallResult {
@@ -71,302 +123,46 @@ extension DependencyInstallSheet {
     }
 }
 
-// MARK: - Stage Router
-
-extension DependencyInstallSheet {
-    private var stageContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                switch stage {
-                case .info:
-                    infoStage
-                case .preflight:
-                    preflightStage
-                case .running:
-                    runningStage
-                case .verify:
-                    verifyStage
-                }
-            }
-            .padding(24)
-        }
-    }
-}
-
-// MARK: - Info Stage
+// MARK: - Footer
 
 extension DependencyInstallSheet {
     @ViewBuilder
-    private var infoStage: some View {
-        Label("What you\u{2019}re installing", systemImage: "info.circle.fill")
-            .font(.title2)
-            .fontWeight(.semibold)
-
-        Text(definition.displayName)
-            .font(.title3)
-
-        Text(definition.description)
-            .foregroundStyle(.secondary)
-
-        GroupBox {
-            VStack(alignment: .leading, spacing: 8) {
-                Label(
-                    "This will install: \(definition.winetricksVerbs.joined(separator: ", "))",
-                    systemImage: "shippingbox"
-                )
-                .font(.callout)
-
-                Label(
-                    "Estimated time: \(definition.estimatedInstallMinutes) minutes",
-                    systemImage: "clock"
-                )
-                .font(.callout)
+    private var footerButtons: some View {
+        // Cancel during the running stage dismisses the sheet while winetricks
+        // keeps streaming in the background. Left exactly as it was found.
+        if stage != .verify {
+            Button("create.cancel") {
+                dismiss()
             }
-            .padding(4)
+            .keyboardShortcut(.cancelAction)
         }
 
-        GroupBox {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
-                Text("Installed components cannot be automatically removed.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+        NCFooterSpacer()
+
+        switch stage {
+        case .info:
+            Button("dependency.install.continue") {
+                stage = .preflight
+                runPreflightChecks()
             }
-            .padding(4)
-        }
-    }
-}
-
-// MARK: - Preflight Stage
-
-extension DependencyInstallSheet {
-    @ViewBuilder
-    private var preflightStage: some View {
-        Label("Preflight Checks", systemImage: "checklist")
-            .font(.title2)
-            .fontWeight(.semibold)
-
-        if let result = preflightResult {
-            preflightResultView(result)
-        } else {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Checking prefix health\u{2026}")
-                    .foregroundStyle(.secondary)
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+        case .preflight:
+            Button("dependency.install") {
+                startInstallation()
             }
-        }
-
-        verbPlanSection
-    }
-
-    @ViewBuilder
-    private func preflightResultView(_ result: PreflightResult) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: result.prefixValid ? "checkmark.circle.fill" : "xmark.circle.fill")
-                .foregroundStyle(result.prefixValid ? .green : .red)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Prefix Health")
-                    .font(.callout)
-                    .fontWeight(.medium)
-                Text(result.prefixMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
+            .disabled(preflightResult == nil)
+        case .running:
+            EmptyView()
+        case .verify:
+            Button("dependency.install.done") {
+                dismiss()
             }
+            .buttonStyle(.borderedProminent)
+            .keyboardShortcut(.defaultAction)
         }
-
-        if !result.prefixValid {
-            GroupBox {
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("Prefix validation failed. Installation may not succeed. You can proceed anyway.")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(4)
-            }
-        }
-    }
-
-    private var verbPlanSection: some View {
-        GroupBox("Verbs to install") {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(definition.winetricksVerbs, id: \.self) { verb in
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(.green)
-                            .font(.caption)
-                        Text(verb)
-                            .font(.system(.callout, design: .monospaced))
-                    }
-                }
-            }
-            .padding(4)
-        }
-    }
-}
-
-// MARK: - Running Stage
-
-extension DependencyInstallSheet {
-    @ViewBuilder
-    private var runningStage: some View {
-        Label("Installing\u{2026}", systemImage: "arrow.down.circle")
-            .font(.title2)
-            .fontWeight(.semibold)
-
-        HStack(spacing: 8) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Running winetricks for \(definition.displayName)")
-                .foregroundStyle(.secondary)
-        }
-
-        DisclosureGroup(isExpanded: $showLog) {
-            logView
-        } label: {
-            Text("Installation Log (\(logLines.count) lines)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var logView: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    ForEach(Array(logLines.enumerated()), id: \.offset) { index, line in
-                        Text(line)
-                            .font(.system(.caption2, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .id(index)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
-            }
-            .frame(maxHeight: 200)
-            .background(.quaternary.opacity(0.3))
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .onChange(of: logLines.count) {
-                if let last = logLines.indices.last {
-                    proxy.scrollTo(last, anchor: .bottom)
-                }
-            }
-        }
-    }
-}
-
-// MARK: - Verify Stage
-
-extension DependencyInstallSheet {
-    @ViewBuilder
-    private var verifyStage: some View {
-        Label("Verification", systemImage: "checkmark.seal")
-            .font(.title2)
-            .fontWeight(.semibold)
-
-        if let result = installResult {
-            installResultView(result)
-        }
-
-        if let status = verifyStatus {
-            verifyStatusView(status)
-        } else {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text("Re-checking dependency status\u{2026}")
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func installResultView(_ result: InstallResult) -> some View {
-        switch result {
-        case .success:
-            Label("Installation completed successfully", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case let .failure(exitCode):
-            Label(
-                "Installation exited with code \(exitCode)",
-                systemImage: "exclamationmark.triangle.fill"
-            )
-            .foregroundStyle(.orange)
-        case let .error(message):
-            Label("Installation failed: \(message)", systemImage: "xmark.circle.fill")
-                .foregroundStyle(.red)
-        }
-    }
-
-    private func verifyStatusView(_ status: DependencyInstallStatus) -> some View {
-        GroupBox {
-            HStack(spacing: 8) {
-                switch status {
-                case .installed:
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                    Text("All components verified as installed")
-                case .partiallyInstalled:
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                    Text("Some components may not have installed correctly")
-                case .notInstalled:
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                    Text("Installation may have failed -- components not detected")
-                case .unknown:
-                    Image(systemName: "questionmark.circle.fill")
-                        .foregroundStyle(.gray)
-                    Text("Could not verify installation status")
-                }
-            }
-            .padding(4)
-        }
-    }
-}
-
-// MARK: - Bottom Bar
-
-extension DependencyInstallSheet {
-    private var bottomBar: some View {
-        HStack {
-            if stage != .verify {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-            }
-
-            Spacer()
-
-            switch stage {
-            case .info:
-                Button("Continue") {
-                    stage = .preflight
-                    runPreflightChecks()
-                }
-                .keyboardShortcut(.defaultAction)
-            case .preflight:
-                Button("Install") {
-                    startInstallation()
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(preflightResult == nil)
-            case .running:
-                EmptyView()
-            case .verify:
-                Button("Done") {
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-        }
-        .padding(16)
     }
 }
 
@@ -392,13 +188,16 @@ extension DependencyInstallSheet {
 
     private func startInstallation() {
         stage = .running
-        isInstalling = true
         logLines = []
 
         Task {
             let verbStream = Winetricks.installVerbs(definition.winetricksVerbs, for: bottle)
-            var lastExitCode: Int32 = 0
+            // Success used to be decided by the LAST verb's exit code alone, so
+            // a definition whose first verb failed and second passed reported
+            // success. Every verb's outcome counts now.
+            var firstFailure: Int32?
             var hadError = false
+            var didTimeOut = false
 
             for await (verb, progress) in verbStream {
                 await MainActor.run {
@@ -409,30 +208,59 @@ extension DependencyInstallSheet {
                         logLines.append("[\(verb)] \(line)")
                     case let .completed(exitCode):
                         logLines.append("[\(verb)] Completed (exit code: \(exitCode))")
-                        lastExitCode = exitCode
+                        if exitCode != 0, firstFailure == nil {
+                            firstFailure = exitCode
+                        }
                     case let .failed(message):
                         logLines.append("[\(verb)] FAILED: \(message)")
                         hadError = true
+                    case let .timedOut(seconds):
+                        logLines.append("[\(verb)] TIMED OUT after \(seconds / 60) minutes")
+                        didTimeOut = true
                     }
                 }
             }
 
-            let result: InstallResult = if hadError {
+            let result: InstallResult = if didTimeOut {
+                .error(String(localized: "dependency.install.timedOut"))
+            } else if hadError {
                 .error("One or more verbs failed")
-            } else if lastExitCode == 0 {
-                .success
+            } else if let firstFailure {
+                .failure(exitCode: firstFailure)
             } else {
-                .failure(exitCode: lastExitCode)
+                .success
             }
 
             await MainActor.run {
                 installResult = result
-                isInstalling = false
                 stage = .verify
             }
 
+            await writeTranscript()
             await runVerification()
             await saveInstallAttempt(result)
+        }
+    }
+
+    /// Puts the streamed output on disk before the sheet can be closed.
+    ///
+    /// The transcript lived only in view state, so the one place the reason for
+    /// a failure existed was destroyed by dismissing the sheet that reported
+    /// it. Written for successes too — a verb that "worked" but installed
+    /// nothing is exactly the case worth reading afterwards.
+    private func writeTranscript() async {
+        let (bottleURL, lines) = await MainActor.run { (bottle.url, logLines) }
+        guard !lines.isEmpty else { return }
+        let folder = bottleURL.appending(path: "InstallLogs")
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let file = folder.appending(path: "\(definition.id)-\(stamp).log")
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try lines.joined(separator: "\n").write(to: file, atomically: true, encoding: .utf8)
+            await MainActor.run { transcriptPath = file.path(percentEncoded: false) }
+        } catch {
+            // Losing the transcript must not also lose the install result.
+            await MainActor.run { transcriptPath = nil }
         }
     }
 
@@ -443,6 +271,10 @@ extension DependencyInstallSheet {
         )
         await MainActor.run {
             verifyStatus = statuses.first?.status ?? .unknown
+            NotificationCenter.default.post(
+                name: .dependenciesChanged,
+                object: bottle.url
+            )
         }
     }
 
@@ -475,5 +307,3 @@ extension DependencyInstallSheet {
         try? history.save(to: bottleURL)
     }
 }
-
-// swiftlint:enable file_length
